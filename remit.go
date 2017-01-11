@@ -13,6 +13,13 @@ import (
 var url = flag.String("url", "amqp:///", "The AMQP URL to connect to.")
 var name = flag.String("name", "", "The name to give this Remit service.")
 
+func init() {
+        flag.Parse()
+
+        log.Println("URL is:", *url)
+        log.Println("Name is:", *name)
+}
+
 type Config struct {
         Name *string
         Url *string
