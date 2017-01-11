@@ -3,12 +3,14 @@ package main
 import (
         "log"
         "flag"
-        "encoding/json"
+        "time"
 
         "github.com/streadway/amqp"
+        "github.com/google/uuid"
 )
 
-var url = flag.String("jack", "amqp:///", "The AMQP URL to connect to.")
+var url = flag.String("url", "amqp:///", "The AMQP URL to connect to.")
+var name = flag.String("name", "", "The name to give this Remit service.")
 
 func init() {
         flag.Parse()
@@ -22,10 +24,12 @@ func main() {
         ch, err := conn.Channel()
         failOnError(err, "Failed to open a channel")
 
-        body, _ := json.Marshal(map[string]string{
-                "foo": "bar",
+        body := []byte(`{
+                "foo": true,
                 "baz": "qux",
-        })
+                "bool": true,
+                "notBool": false
+        }`)
 
         sendMessage(ch, body)
 }
@@ -38,7 +42,10 @@ func sendMessage(ch *amqp.Channel, body []byte) {
                 false,
                 amqp.Publishing{
                         ContentType: "application/json",
-                        Body: []byte(body),
+                        Body: body,
+                        Timestamp: time.Now(),
+                        MessageId: uuid.New().String(),
+                        AppId: *name,
                 },
         )
 
