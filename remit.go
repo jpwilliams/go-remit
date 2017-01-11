@@ -1,13 +1,10 @@
 package remit
 
 import (
-        "log"
         "flag"
-        "encoding/json"
-        // "time"
 
         "github.com/streadway/amqp"
-        "github.com/google/uuid"
+        "github.com/chuckpreslar/emission"
 )
 
 var url = flag.String("url", "amqp:///", "The AMQP URL to connect to.")
@@ -15,39 +12,7 @@ var name = flag.String("name", "", "The name to give this Remit service.")
 
 func init() {
         flag.Parse()
-
-        log.Println("URL is:", *url)
-        log.Println("Name is:", *name)
 }
-
-type Config struct {
-        Name *string
-        Url *string
-}
-
-type Session struct {
-        config Config
-        connection *amqp.Connection
-        workChannel *amqp.Channel
-        publishChannel *amqp.Channel
-        consumeChannel *amqp.Channel
-}
-
-type Endpoint struct {
-        RoutingKey string
-        Queue string
-}
-
-type Event struct {
-        EventId string
-        EventType string
-        Resource string
-        Data EventData
-        Callback EventCallback
-}
-
-type EventData map[string]interface{}
-type EventCallback func()
 
 func Connect() (Session) {
         conn, err := amqp.Dial(*url)
@@ -72,36 +37,11 @@ func Connect() (Session) {
                 workChannel: workChannel,
                 publishChannel: publishChannel,
                 consumeChannel: consumeChannel,
-        }
-}
+                emitter: emission.NewEmitter(),
 
-func(session *Session) Endpoint(key string) (Endpoint) {
-        log.Println("Adding endpoint for", key, session)
-
-        return Endpoint{
-                RoutingKey: key,
-                Queue: key,
-        }
-}
-
-func(endpoint *Endpoint) Data(handler func(Event)) {
-        log.Println("Data listener added")
-
-        parsedData := EventData{}
-        err := json.Unmarshal([]byte(`{"foo": "bar"}`), &parsedData)
-        failOnError(err, "Failed to parse JSON")
-
-        handler(Event{
-                EventId: uuid.New().String(),
-                EventType: "a.message",
-                Resource: "that.publisher",
-                Data: parsedData,
-        })
-}
-
-func failOnError(err error, msg string) {
-        if err != nil {
-                log.Fatalf("%s: %s", msg, err)
+                EndpointGlobal: EndpointGlobal{
+                        emitter: emission.NewEmitter(),
+                },
         }
 }
 
