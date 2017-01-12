@@ -1,15 +1,17 @@
 package remit
 
 import (
-        "log"
+	"log"
 
-        "github.com/chuckpreslar/emission"
+	"github.com/chuckpreslar/emission"
 )
 
 type EndpointGlobal struct {
-        emitter *emission.Emitter
+	emitter *emission.Emitter
 }
 
-func(endpoint *EndpointGlobal) Data(handler func(Event)) {
-        log.Println("Adding global Data listener")
+func (endpoint EndpointGlobal) Data(handler func(Event)) EndpointGlobal {
+	log.Println("Adding global Data listener")
+
+	return endpoint
 }

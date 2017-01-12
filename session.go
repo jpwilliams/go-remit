@@ -1,36 +1,61 @@
 package remit
 
 import (
-        "log"
+	// "log"
 
-        "github.com/streadway/amqp"
-        "github.com/chuckpreslar/emission"
+	"github.com/chuckpreslar/emission"
+	"github.com/streadway/amqp"
 )
 
 type Session struct {
-        config          Config
-        connection      *amqp.Connection
-        workChannel     *amqp.Channel
-        publishChannel  *amqp.Channel
-        consumeChannel  *amqp.Channel
-        emitter         *emission.Emitter
-        EndpointGlobal  EndpointGlobal
+	Config         Config
+	connection     *amqp.Connection
+	workChannel    *amqp.Channel
+	publishChannel *amqp.Channel
+	consumeChannel *amqp.Channel
+	emitter        *emission.Emitter
+	EndpointGlobal EndpointGlobal
+	testKey        string
 }
 
-func(session *Session) Endpoint(key string) (Endpoint) {
-        log.Println("Adding endpoint for", key)
+func (session *Session) Endpoint(key string) Endpoint {
+	endpoint := createEndpoint(session, EndpointOptions{
+		RoutingKey: key,
+		Queue:      key,
+	})
 
-        return Endpoint{
-                RoutingKey: key,
-                Queue: key,
-                session: session,
-        }
+	return endpoint
 }
 
-func(session *Session) Emit(key string) (Emit) {
-        log.Println("Adding emission for", key)
+func (session *Session) EndpointWithOptions(options EndpointOptions) Endpoint {
+	if options.Queue == "" && options.RoutingKey == "" {
+		panic("No queue or routing key given")
+	}
 
-        return Emit{
-                session: session,
-        }
+	if options.RoutingKey == "" {
+		if options.Queue != "" {
+			options.RoutingKey = options.Queue
+		} else {
+			panic("No routing key (explicit or implicit) given")
+		}
+	}
+
+	return Endpoint{
+		RoutingKey: options.RoutingKey,
+		Queue:      options.Queue,
+		session:    session,
+		emitter:    emission.NewEmitter(),
+	}
+}
+
+func (session *Session) Emit(key string) Emit {
+	if key == "" {
+		panic("No valid routing key given for emission")
+	}
+
+	emit := createEmit(session, EmitOptions{
+		RoutingKey: key,
+	})
+
+	return emit
 }
