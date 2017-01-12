@@ -18,10 +18,11 @@ type Session struct {
 	testKey        string
 }
 
-func (session *Session) Endpoint(key string) Endpoint {
+func (session *Session) Endpoint(key string, handler EndpointDataHandler) Endpoint {
 	endpoint := createEndpoint(session, EndpointOptions{
-		RoutingKey: key,
-		Queue:      key,
+		RoutingKey:  key,
+		Queue:       key,
+		DataHandler: handler,
 	})
 
 	return endpoint

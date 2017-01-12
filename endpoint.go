@@ -10,27 +10,32 @@ import (
 )
 
 type Endpoint struct {
-	RoutingKey string
-	Queue      string
-	session    *Session
-	emitter    *emission.Emitter
-	Data       chan Event
-	Ready      chan bool
+	RoutingKey  string
+	Queue       string
+	session     *Session
+	emitter     *emission.Emitter
+	Data        chan Event
+	Ready       chan bool
+	DataHandler EndpointDataHandler
 }
 
 type EndpointOptions struct {
-	RoutingKey string
-	Queue      string
+	RoutingKey  string
+	Queue       string
+	DataHandler EndpointDataHandler
 }
+
+type EndpointDataHandler func(Event) (interface{}, error)
 
 func createEndpoint(session *Session, options EndpointOptions) Endpoint {
 	endpoint := Endpoint{
-		RoutingKey: options.RoutingKey,
-		Queue:      options.Queue,
-		session:    session,
-		emitter:    emission.NewEmitter(),
-		Data:       make(chan Event),
-		Ready:      make(chan bool),
+		RoutingKey:  options.RoutingKey,
+		Queue:       options.Queue,
+		session:     session,
+		emitter:     emission.NewEmitter(),
+		Data:        make(chan Event),
+		Ready:       make(chan bool),
+		DataHandler: options.DataHandler,
 	}
 
 	go endpoint.setup()
@@ -77,6 +82,17 @@ func (endpoint Endpoint) setup() {
 	failOnError(err, "Failed trying to consume")
 	fmt.Println("Consuming messages")
 
+	go func() {
+		for event := range endpoint.Data {
+			result, err := endpoint.DataHandler(event)
+
+			fmt.Println("Got result", result)
+			fmt.Println("Got error", err)
+
+			event.message.Ack(false)
+		}
+	}()
+
 	go messageHandler(endpoint, deliveries)
 
 	// Have made this non-blocking (so will ignore if
@@ -90,30 +106,6 @@ func (endpoint Endpoint) setup() {
 	}
 }
 
-func (endpoint Endpoint) OnData(handler func(Event)) Endpoint {
-	fmt.Println("Adding Data listener")
-
-	go func() {
-		for data := range endpoint.Data {
-			handler(data)
-		}
-	}()
-
-	return endpoint
-}
-
-func (endpoint Endpoint) OnReady(handler func()) Endpoint {
-	fmt.Println("Adding Ready listener")
-
-	go func() {
-		for _ = range endpoint.Ready {
-			handler()
-		}
-	}()
-
-	return endpoint
-}
-
 func messageHandler(endpoint Endpoint, deliveries <-chan amqp.Delivery) {
 	for d := range deliveries {
 		parsedData := EventData{}
@@ -125,10 +117,9 @@ func messageHandler(endpoint Endpoint, deliveries <-chan amqp.Delivery) {
 			EventType: d.RoutingKey,
 			Resource:  d.AppId,
 			Data:      parsedData,
+			message:   d,
 		}
 
 		endpoint.Data <- event
-
-		d.Ack(false)
 	}
 }
