@@ -3,8 +3,8 @@ package remit
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
-	// "github.com/google/uuid"
 	"github.com/chuckpreslar/emission"
 	"github.com/streadway/amqp"
 )
@@ -25,7 +25,7 @@ type EndpointOptions struct {
 	DataHandler EndpointDataHandler
 }
 
-type EndpointDataHandler func(Event) (interface{}, error)
+type EndpointDataHandler func(Event) (interface{}, interface{})
 
 func createEndpoint(session *Session, options EndpointOptions) Endpoint {
 	endpoint := Endpoint{
@@ -84,10 +84,54 @@ func (endpoint Endpoint) setup() {
 
 	go func() {
 		for event := range endpoint.Data {
-			result, err := endpoint.DataHandler(event)
+			retResult, retErr := endpoint.DataHandler(event)
 
-			fmt.Println("Got result", result)
-			fmt.Println("Got error", err)
+			fmt.Println("Got result...")
+			fmt.Println("Got error", retErr)
+
+			var accumulatedResults [2]interface{}
+			accumulatedResults[0] = retErr
+			accumulatedResults[1] = retResult
+
+			j, err := json.Marshal(accumulatedResults)
+			failOnError(err, "Failed making JSON from result")
+
+			// fmt.Println(event.message)
+
+			if event.message.ReplyTo == "" || event.message.CorrelationId == "" {
+				event.message.Ack(false)
+
+				return
+			}
+
+			queue, err = endpoint.session.workChannel.QueueDeclarePassive(
+				event.message.ReplyTo, // the queue to assert
+				false, // durable
+				true,  // autoDelete
+				true,  //exclusive
+				false, // noWait
+				nil,   // arguments
+			)
+
+			failOnError(err, "Reply queue just not there")
+
+			err = endpoint.session.publishChannel.Publish(
+				"",         // exchange - use default here to publish directly to queue
+				queue.Name, // routing key / queue
+				false,      // mandatory
+				false,      // immediate
+				amqp.Publishing{
+					Headers:       amqp.Table{},
+					ContentType:   "application/json",
+					Body:          j,
+					Timestamp:     time.Now(),
+					MessageId:     event.message.MessageId,
+					AppId:         *endpoint.session.Config.Name,
+					CorrelationId: event.message.CorrelationId,
+				},
+			)
+
+			failOnError(err, "Couldn't send that message")
 
 			event.message.Ack(false)
 		}
