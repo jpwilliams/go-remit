@@ -18,6 +18,11 @@ type Session struct {
 	testKey        string
 }
 
+func (session *Session) Close() {
+	err := session.connection.Close()
+	failOnError(err, "Failed to close connection to RabbitMQ safely")
+}
+
 func (session *Session) Endpoint(key string, handler EndpointDataHandler) Endpoint {
 	endpoint := createEndpoint(session, EndpointOptions{
 		RoutingKey:  key,
