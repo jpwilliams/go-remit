@@ -2,10 +2,10 @@ package remit
 
 import (
 	"encoding/json"
-	"fmt"
+	"sync"
 	"time"
 
-	"github.com/chuckpreslar/emission"
+	"github.com/google/uuid"
 	"github.com/streadway/amqp"
 )
 
@@ -13,10 +13,12 @@ type Endpoint struct {
 	RoutingKey  string
 	Queue       string
 	session     *Session
-	emitter     *emission.Emitter
+	channel     *amqp.Channel
 	Data        chan Event
 	Ready       chan bool
 	DataHandler EndpointDataHandler
+	waitGroup   sync.WaitGroup
+	consumerTag string
 }
 
 type EndpointOptions struct {
@@ -32,18 +34,17 @@ func createEndpoint(session *Session, options EndpointOptions) Endpoint {
 		RoutingKey:  options.RoutingKey,
 		Queue:       options.Queue,
 		session:     session,
-		emitter:     emission.NewEmitter(),
 		Data:        make(chan Event),
-		Ready:       make(chan bool),
 		DataHandler: options.DataHandler,
+		waitGroup:   sync.WaitGroup{},
 	}
 
-	go endpoint.setup()
+	go endpoint.start()
 
 	return endpoint
 }
 
-func (endpoint Endpoint) setup() {
+func (endpoint Endpoint) start() {
 	queue, err := endpoint.session.workChannel.QueueDeclare(
 		endpoint.Queue, // name of the queue
 		true,           // durable
@@ -55,7 +56,6 @@ func (endpoint Endpoint) setup() {
 
 	failOnError(err, "Could not create endpoint queue")
 	endpoint.Queue = queue.Name
-	fmt.Println("Declared queue", endpoint.Queue)
 
 	err = endpoint.session.workChannel.QueueBind(
 		endpoint.Queue,      // name of the queue
@@ -66,21 +66,22 @@ func (endpoint Endpoint) setup() {
 	)
 
 	failOnError(err, "Could not bind queue to routing key")
-	fmt.Println("Bound", endpoint.Queue, "to routing key", endpoint.RoutingKey)
-	fmt.Println("Starting consumption")
 
-	deliveries, err := endpoint.session.consumeChannel.Consume(
-		endpoint.Queue, // name of the queue
-		"",             // consumer tag
-		false,          // noAck
-		false,          // exclusive
-		false,          // noLocal
-		false,          // noWait
-		nil,            // arguments
+	endpoint.channel, err = endpoint.session.connection.Channel()
+	failOnError(err, "Failed to create channel for consumption")
+
+	endpoint.consumerTag = uuid.New().String()
+	deliveries, err := endpoint.channel.Consume(
+		endpoint.Queue,       // name of the queue
+		endpoint.consumerTag, // consumer tag
+		false,                // noAck
+		false,                // exclusive
+		false,                // noLocal
+		false,                // noWait
+		nil,                  // arguments
 	)
 
 	failOnError(err, "Failed trying to consume")
-	fmt.Println("Consuming messages")
 
 	go func() {
 		for event := range endpoint.Data {
@@ -97,18 +98,25 @@ func (endpoint Endpoint) setup() {
 	select {
 	case endpoint.Ready <- true:
 	default:
-		fmt.Println("No ready listener to hear")
 	}
 }
 
-func handleData(endpoint Endpoint, event Event) {
-	// As this is in a for loop, I don't think we can defer.
-	// Therefore, the Done() call for this is at the bottom
-	// of the loop.
-	endpoint.session.waitGroup.Add(1)
+func (endpoint Endpoint) Close() {
+	err := endpoint.channel.Cancel(endpoint.consumerTag, false)
+	failOnError(err, "Failed to clean up consume channel handler")
+	endpoint.waitGroup.Wait()
+	err = endpoint.channel.Close()
+	failOnError(err, "Failed to close consume channel for endpoint")
+	close(endpoint.Data)
+	close(endpoint.Ready)
+}
 
-	// Let's set up some channels that the client will reply
-	// on.
+func handleData(endpoint Endpoint, event Event) {
+	endpoint.session.waitGroup.Add(1)
+	defer endpoint.session.waitGroup.Done()
+	endpoint.waitGroup.Add(1)
+	defer endpoint.waitGroup.Done()
+
 	go endpoint.DataHandler(event)
 
 	var retResult interface{}
@@ -128,8 +136,6 @@ func handleData(endpoint Endpoint, event Event) {
 
 	j, err := json.Marshal(accumulatedResults)
 	failOnError(err, "Failed making JSON from result")
-
-	// fmt.Println(event.message)
 
 	if event.message.ReplyTo == "" || event.message.CorrelationId == "" {
 		event.message.Ack(false)
@@ -167,7 +173,6 @@ func handleData(endpoint Endpoint, event Event) {
 	failOnError(err, "Couldn't send that message")
 
 	event.message.Ack(false)
-	endpoint.session.waitGroup.Done()
 }
 
 func messageHandler(endpoint Endpoint, deliveries <-chan amqp.Delivery) {

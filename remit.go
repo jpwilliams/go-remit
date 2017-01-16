@@ -42,9 +42,6 @@ func Connect(options ConnectionOptions) Session {
 	publishChannel, err := conn.Channel()
 	failOnError(err, "Failed to open publish channel")
 
-	consumeChannel, err := conn.Channel()
-	failOnError(err, "Failed to open consume channel")
-
 	return Session{
 		Config: Config{
 			Name: options.Name,
@@ -54,8 +51,6 @@ func Connect(options ConnectionOptions) Session {
 		connection:     conn,
 		workChannel:    workChannel,
 		publishChannel: publishChannel,
-		consumeChannel: consumeChannel,
-		emitter:        emission.NewEmitter(),
 
 		EndpointGlobal: EndpointGlobal{
 			emitter: emission.NewEmitter(),

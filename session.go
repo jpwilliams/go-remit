@@ -6,7 +6,6 @@ import (
 	"os/signal"
 	"sync"
 
-	"github.com/chuckpreslar/emission"
 	"github.com/streadway/amqp"
 )
 
@@ -15,8 +14,6 @@ type Session struct {
 	connection     *amqp.Connection
 	workChannel    *amqp.Channel
 	publishChannel *amqp.Channel
-	consumeChannel *amqp.Channel
-	emitter        *emission.Emitter
 	EndpointGlobal EndpointGlobal
 	waitGroup      sync.WaitGroup
 }
@@ -92,7 +89,6 @@ func (session *Session) EndpointWithOptions(options EndpointOptions) Endpoint {
 		RoutingKey: options.RoutingKey,
 		Queue:      options.Queue,
 		session:    session,
-		emitter:    emission.NewEmitter(),
 	}
 }
 
