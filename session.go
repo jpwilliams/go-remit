@@ -1,7 +1,7 @@
 package remit
 
 import (
-	// "log"
+	"log"
 
 	"github.com/chuckpreslar/emission"
 	"github.com/streadway/amqp"
@@ -21,6 +21,7 @@ type Session struct {
 func (session *Session) Close() {
 	err := session.connection.Close()
 	failOnError(err, "Failed to close connection to RabbitMQ safely")
+	log.Println("Safely closed AMQP connection")
 }
 
 func (session *Session) Endpoint(key string, handler EndpointDataHandler) Endpoint {

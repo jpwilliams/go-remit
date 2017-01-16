@@ -38,7 +38,7 @@ func (request Emit) Send(data []byte) Emit {
 		Body:        data,
 		Timestamp:   time.Now(),
 		MessageId:   uuid.New().String(),
-		AppId:       *request.session.Config.Name,
+		AppId:       request.session.Config.Name,
 	}
 
 	err := request.session.publishChannel.Publish(

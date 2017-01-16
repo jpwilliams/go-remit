@@ -1,22 +1,19 @@
 package remit
 
 import (
-	"flag"
 	"log"
 
 	"github.com/chuckpreslar/emission"
 	"github.com/streadway/amqp"
 )
 
-var url = flag.String("url", "amqp:///", "The AMQP URL to connect to.")
-var name = flag.String("name", "", "The name to give this Remit service.")
-
-func init() {
-	flag.Parse()
+type ConnectionOptions struct {
+	Url  string
+	Name string
 }
 
-func Connect() Session {
-	conn, err := amqp.Dial(*url)
+func Connect(options ConnectionOptions) Session {
+	conn, err := amqp.Dial(options.Url)
 	failOnError(err, "Failed to connect to RabbitMQ")
 
 	closing := conn.NotifyClose(make(chan *amqp.Error))
@@ -49,8 +46,8 @@ func Connect() Session {
 
 	return Session{
 		Config: Config{
-			Name: name,
-			Url:  url,
+			Name: options.Name,
+			Url:  options.Url,
 		},
 
 		connection:     conn,

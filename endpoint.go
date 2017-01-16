@@ -126,7 +126,7 @@ func (endpoint Endpoint) setup() {
 					Body:          j,
 					Timestamp:     time.Now(),
 					MessageId:     event.message.MessageId,
-					AppId:         *endpoint.session.Config.Name,
+					AppId:         endpoint.session.Config.Name,
 					CorrelationId: event.message.CorrelationId,
 				},
 			)
