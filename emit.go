@@ -10,9 +10,10 @@ import (
 )
 
 type Emit struct {
+	session *Session
+	emitter *emission.Emitter
+
 	RoutingKey string
-	session    *Session
-	emitter    *emission.Emitter
 }
 
 type EmitOptions EndpointOptions

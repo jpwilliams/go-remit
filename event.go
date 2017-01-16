@@ -5,13 +5,15 @@ import (
 )
 
 type Event struct {
+	message amqp.Delivery
+
 	EventId   string
 	EventType string
 	Resource  string
 	Data      EventData
-	Success   chan interface{}
-	Failure   chan interface{}
-	message   amqp.Delivery
+
+	Success chan interface{}
+	Failure chan interface{}
 }
 
 type EventData map[string]interface{}

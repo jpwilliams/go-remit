@@ -10,12 +10,14 @@ import (
 )
 
 type Session struct {
-	Config         Config
 	connection     *amqp.Connection
 	workChannel    *amqp.Channel
 	publishChannel *amqp.Channel
+
+	waitGroup sync.WaitGroup
+
+	Config         Config
 	EndpointGlobal EndpointGlobal
-	waitGroup      sync.WaitGroup
 }
 
 func (session *Session) CloseOnSignal() chan bool {

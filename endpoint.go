@@ -12,20 +12,24 @@ import (
 // Endpoint manages the RPC-style consumption and
 // publishing of messages.
 type Endpoint struct {
-	RoutingKey  string
-	Queue       string
 	session     *Session
 	channel     *amqp.Channel
-	Data        chan Event
-	Ready       chan bool
-	DataHandler EndpointDataHandler
 	waitGroup   sync.WaitGroup
 	consumerTag string
+
+	RoutingKey string
+	Queue      string
+
+	Data  chan Event
+	Ready chan bool
+
+	DataHandler EndpointDataHandler
 }
 
 type EndpointOptions struct {
-	RoutingKey  string
-	Queue       string
+	RoutingKey string
+	Queue      string
+
 	DataHandler EndpointDataHandler
 }
 
