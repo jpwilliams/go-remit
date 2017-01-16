@@ -32,6 +32,9 @@ func (request Emit) Sent(handler func()) Emit {
 }
 
 func (request Emit) Send(data []byte) Emit {
+	request.session.waitGroup.Add(1)
+	defer request.session.waitGroup.Done()
+
 	message := amqp.Publishing{
 		Headers:     amqp.Table{},
 		ContentType: "application/json",

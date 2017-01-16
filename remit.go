@@ -2,6 +2,7 @@ package remit
 
 import (
 	"log"
+	"sync"
 
 	"github.com/chuckpreslar/emission"
 	"github.com/streadway/amqp"
@@ -59,6 +60,8 @@ func Connect(options ConnectionOptions) Session {
 		EndpointGlobal: EndpointGlobal{
 			emitter: emission.NewEmitter(),
 		},
+
+		waitGroup: sync.WaitGroup{},
 	}
 }
 

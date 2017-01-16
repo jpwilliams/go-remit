@@ -9,6 +9,8 @@ type Event struct {
 	EventType string
 	Resource  string
 	Data      EventData
+	Success   chan interface{}
+	Failure   chan interface{}
 	message   amqp.Delivery
 }
 
