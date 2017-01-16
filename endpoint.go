@@ -9,6 +9,8 @@ import (
 	"github.com/streadway/amqp"
 )
 
+// Endpoint manages the RPC-style consumption and
+// publishing of messages.
 type Endpoint struct {
 	RoutingKey  string
 	Queue       string
