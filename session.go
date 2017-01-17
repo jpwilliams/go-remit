@@ -1,12 +1,15 @@
 package remit
 
 import (
+	"encoding/json"
 	"log"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/streadway/amqp"
 )
 
@@ -101,14 +104,33 @@ func (session *Session) EndpointWithOptions(options EndpointOptions) Endpoint {
 	}
 }
 
-func (session *Session) Emit(key string) Emit {
+func (session *Session) Emit(key string, data interface{}) {
 	if key == "" {
 		panic("No valid routing key given for emission")
 	}
 
-	emit := createEmit(session, EmitOptions{
-		RoutingKey: key,
-	})
+	session.waitGroup.Add(1)
+	defer session.waitGroup.Done()
 
-	return emit
+	j, err := json.Marshal(data)
+	failOnError(err, "Failed making JSON from emission data")
+
+	message := amqp.Publishing{
+		Headers:     amqp.Table{},
+		ContentType: "application/json",
+		Body:        j,
+		Timestamp:   time.Now(),
+		MessageId:   uuid.New().String(),
+		AppId:       session.Config.Name,
+	}
+
+	err = session.publishChannel.Publish(
+		"remit", // exchange
+		key,     // routing key
+		false,   // mandatory
+		false,   // immediate
+		message, // message
+	)
+
+	failOnError(err, "Failed to emit message")
 }
