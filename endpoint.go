@@ -2,6 +2,7 @@ package remit
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -123,10 +124,12 @@ func handleData(endpoint Endpoint, event Event) {
 	endpoint.waitGroup.Add(1)
 	defer endpoint.waitGroup.Done()
 
-	go endpoint.DataHandler(event)
-
 	var retResult interface{}
 	var retErr interface{}
+
+	fmt.Println("Received", event.message.MessageId)
+
+	go endpoint.DataHandler(event)
 
 	select {
 	case retResult = <-event.Success:
@@ -135,6 +138,12 @@ func handleData(endpoint Endpoint, event Event) {
 
 	close(event.Success)
 	close(event.Failure)
+
+	if retResult != nil {
+		fmt.Println("Completed", event.message.MessageId, "- success")
+	} else {
+		fmt.Println("Completed", event.message.MessageId, "- failure")
+	}
 
 	var accumulatedResults [2]interface{}
 	accumulatedResults[0] = retErr
