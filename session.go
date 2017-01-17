@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"syscall"
 
 	"github.com/streadway/amqp"
 )
@@ -25,7 +26,13 @@ func (session *Session) CloseOnSignal() chan bool {
 
 	go func() {
 		c := make(chan os.Signal, 2)
-		signal.Notify(c)
+		signal.Notify(
+			c,               // the channel to use
+			syscall.SIGHUP,  // Hangup
+			syscall.SIGINT,  // Terminal interrupt
+			syscall.SIGQUIT, // Terminal quit
+			syscall.SIGTERM, // Termination
+		)
 		<-c
 		logClosure()
 		go func() {
