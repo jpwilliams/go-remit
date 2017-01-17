@@ -154,7 +154,6 @@ func handleData(endpoint Endpoint, event Event) {
 
 	if event.message.ReplyTo == "" || event.message.CorrelationId == "" {
 		event.message.Ack(false)
-
 		return
 	}
 
@@ -179,7 +178,7 @@ func handleData(endpoint Endpoint, event Event) {
 			ContentType:   "application/json",
 			Body:          j,
 			Timestamp:     time.Now(),
-			MessageId:     event.message.MessageId,
+			MessageId:     uuid.New().String(),
 			AppId:         endpoint.session.Config.Name,
 			CorrelationId: event.message.CorrelationId,
 		},
