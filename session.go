@@ -17,11 +17,17 @@ type Session struct {
 	connection     *amqp.Connection
 	workChannel    *amqp.Channel
 	publishChannel *amqp.Channel
+	requestChannel *amqp.Channel
+	awaitingReply  map[string]RequestDataHandler
 
 	waitGroup sync.WaitGroup
 
 	Config         Config
 	EndpointGlobal EndpointGlobal
+}
+
+func (session *Session) registerReply(correlationId string, handler RequestDataHandler) {
+	session.awaitingReply[correlationId] = handler
 }
 
 func (session *Session) CloseOnSignal() chan bool {
@@ -133,4 +139,14 @@ func (session *Session) Emit(key string, data interface{}) {
 	)
 
 	failOnError(err, "Failed to emit message")
+}
+
+func (session *Session) Request(key string, data interface{}, handler RequestDataHandler) Request {
+	request := createRequest(session, RequestOptions{
+		RoutingKey:  key,
+		DataHandler: handler,
+		Data:        data,
+	})
+
+	return request
 }

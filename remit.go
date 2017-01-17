@@ -1,6 +1,7 @@
 package remit
 
 import (
+	"encoding/json"
 	"log"
 	"sync"
 
@@ -42,6 +43,48 @@ func Connect(options ConnectionOptions) Session {
 	publishChannel, err := conn.Channel()
 	failOnError(err, "Failed to open publish channel")
 
+	requestChannel, err := conn.Channel()
+	failOnError(err, "Failed to open replies channel")
+
+	replyList := make(map[string]RequestDataHandler)
+
+	replies, err := requestChannel.Consume(
+		"amq.rabbitmq.reply-to", // name of the queue
+		"",    // consumer tag
+		true,  // noAck
+		true,  // exclusive
+		false, // noLocal
+		false, // noWait
+		nil,   // arguments
+	)
+	failOnError(err, "Failed to consume replies")
+
+	go func() {
+		for reply := range replies {
+			handler := replyList[reply.CorrelationId]
+
+			if handler == nil {
+				continue
+			}
+
+			delete(replyList, reply.CorrelationId)
+
+			parsedData := EventData{}
+			json.Unmarshal(reply.Body, &parsedData)
+			failOnError(err, "Failed to parse JSON")
+
+			event := Event{
+				EventId:   reply.MessageId,
+				EventType: reply.RoutingKey,
+				Resource:  reply.AppId,
+				Data:      parsedData,
+				message:   reply,
+			}
+
+			go handler(event)
+		}
+	}()
+
 	return Session{
 		Config: Config{
 			Name: options.Name,
@@ -51,12 +94,14 @@ func Connect(options ConnectionOptions) Session {
 		connection:     conn,
 		workChannel:    workChannel,
 		publishChannel: publishChannel,
+		requestChannel: requestChannel,
 
 		EndpointGlobal: EndpointGlobal{
 			emitter: emission.NewEmitter(),
 		},
 
-		waitGroup: sync.WaitGroup{},
+		waitGroup:     sync.WaitGroup{},
+		awaitingReply: replyList,
 	}
 }
 
