@@ -15,14 +15,13 @@ import (
 
 type Session struct {
 	connection     *amqp.Connection
-	workChannel    *amqp.Channel
 	publishChannel *amqp.Channel
 	requestChannel *amqp.Channel
 	awaitingReply  map[string]RequestDataHandler
 
 	waitGroup sync.WaitGroup
 
-	Config         Config
+	Config Config
 }
 
 func (session *Session) registerReply(correlationId string, handler RequestDataHandler) {

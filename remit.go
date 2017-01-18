@@ -25,10 +25,10 @@ func Connect(options ConnectionOptions) Session {
 		}
 	}()
 
-	workChannel, err := conn.Channel()
+	setupChannel, err := conn.Channel()
 	failOnError(err, "Failed to open work channel")
 
-	err = workChannel.ExchangeDeclare(
+	err = setupChannel.ExchangeDeclare(
 		"remit", // name of the exchange
 		"topic", // type
 		true,    // durable
@@ -38,6 +38,7 @@ func Connect(options ConnectionOptions) Session {
 		nil,     // arguments
 	)
 	failOnError(err, "Failed to declare \"remit\" exchange")
+	setupChannel.Close()
 
 	publishChannel, err := conn.Channel()
 	failOnError(err, "Failed to open publish channel")
@@ -91,7 +92,6 @@ func Connect(options ConnectionOptions) Session {
 		},
 
 		connection:     conn,
-		workChannel:    workChannel,
 		publishChannel: publishChannel,
 		requestChannel: requestChannel,
 

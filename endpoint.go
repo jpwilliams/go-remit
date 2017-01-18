@@ -15,7 +15,9 @@ import (
 type Endpoint struct {
 	session     *Session
 	channel     *amqp.Channel
+	workChannel *amqp.Channel
 	waitGroup   sync.WaitGroup
+	mu          *sync.Mutex
 	consumerTag string
 
 	RoutingKey string
@@ -44,6 +46,7 @@ func createEndpoint(session *Session, options EndpointOptions) Endpoint {
 		Data:        make(chan Event),
 		DataHandler: options.DataHandler,
 		waitGroup:   sync.WaitGroup{},
+		mu:          &sync.Mutex{},
 	}
 
 	go endpoint.start()
@@ -51,8 +54,35 @@ func createEndpoint(session *Session, options EndpointOptions) Endpoint {
 	return endpoint
 }
 
+func (endpoint *Endpoint) getWorkChannel() *amqp.Channel {
+	endpoint.mu.Lock()
+	defer endpoint.mu.Unlock()
+
+	if endpoint.workChannel != nil {
+		fmt.Println("Returning old work channel")
+
+		return endpoint.workChannel
+	}
+
+	fmt.Println("Creating new work channel")
+
+	var err error
+	endpoint.workChannel, err = endpoint.session.connection.Channel()
+	failOnError(err, "Failed to create work channel for endpoint")
+
+	go func() {
+		waitForClose := make(chan *amqp.Error, 0)
+		endpoint.workChannel.NotifyClose(waitForClose)
+		<-waitForClose
+		endpoint.workChannel = nil
+		endpoint.getWorkChannel()
+	}()
+
+	return endpoint.workChannel
+}
+
 func (endpoint Endpoint) start() {
-	queue, err := endpoint.session.workChannel.QueueDeclare(
+	queue, err := endpoint.getWorkChannel().QueueDeclare(
 		endpoint.Queue, // name of the queue
 		true,           // durable
 		false,          // autoDelete
@@ -64,7 +94,7 @@ func (endpoint Endpoint) start() {
 	failOnError(err, "Could not create endpoint queue")
 	endpoint.Queue = queue.Name
 
-	err = endpoint.session.workChannel.QueueBind(
+	err = endpoint.getWorkChannel().QueueBind(
 		endpoint.Queue,      // name of the queue
 		endpoint.RoutingKey, // routing key to use
 		"remit",             // exchange
@@ -157,7 +187,7 @@ func handleData(endpoint Endpoint, event Event) {
 		return
 	}
 
-	queue, err := endpoint.session.workChannel.QueueDeclarePassive(
+	queue, err := endpoint.getWorkChannel().QueueDeclarePassive(
 		event.message.ReplyTo, // the queue to assert
 		false, // durable
 		true,  // autoDelete
@@ -166,7 +196,11 @@ func handleData(endpoint Endpoint, event Event) {
 		nil,   // arguments
 	)
 
-	failOnError(err, "Reply queue just not there")
+	if err != nil {
+		fmt.Println("Reply consumer no longer present; skipping")
+		event.message.Ack(false)
+		return
+	}
 
 	err = endpoint.session.publishChannel.Publish(
 		"",         // exchange - use default here to publish directly to queue
