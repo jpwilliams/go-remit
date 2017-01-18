@@ -59,12 +59,8 @@ func (endpoint *Endpoint) getWorkChannel() *amqp.Channel {
 	defer endpoint.mu.Unlock()
 
 	if endpoint.workChannel != nil {
-		fmt.Println("Returning old work channel")
-
 		return endpoint.workChannel
 	}
-
-	fmt.Println("Creating new work channel")
 
 	var err error
 	endpoint.workChannel, err = endpoint.session.connection.Channel()
