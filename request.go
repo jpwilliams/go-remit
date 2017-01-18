@@ -62,4 +62,5 @@ func (request Request) send(data interface{}) {
 			ReplyTo:       "amq.rabbitmq.reply-to",
 		},
 	)
+	failOnError(err, "Failed to send request message")
 }
