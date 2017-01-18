@@ -5,7 +5,6 @@ import (
 	"log"
 	"sync"
 
-	"github.com/chuckpreslar/emission"
 	"github.com/streadway/amqp"
 )
 
@@ -95,10 +94,6 @@ func Connect(options ConnectionOptions) Session {
 		workChannel:    workChannel,
 		publishChannel: publishChannel,
 		requestChannel: requestChannel,
-
-		EndpointGlobal: EndpointGlobal{
-			emitter: emission.NewEmitter(),
-		},
 
 		waitGroup:     sync.WaitGroup{},
 		awaitingReply: replyList,

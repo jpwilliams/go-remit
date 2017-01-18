@@ -23,7 +23,6 @@ type Session struct {
 	waitGroup sync.WaitGroup
 
 	Config         Config
-	EndpointGlobal EndpointGlobal
 }
 
 func (session *Session) registerReply(correlationId string, handler RequestDataHandler) {
