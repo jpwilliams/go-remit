@@ -11,7 +11,7 @@ import (
 
 type Request struct {
 	session   *Session
-	waitGroup sync.WaitGroup
+	waitGroup *sync.WaitGroup
 
 	RoutingKey string
 

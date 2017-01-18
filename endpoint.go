@@ -16,7 +16,7 @@ type Endpoint struct {
 	session     *Session
 	channel     *amqp.Channel
 	workChannel *amqp.Channel
-	waitGroup   sync.WaitGroup
+	waitGroup   *sync.WaitGroup
 	mu          *sync.Mutex
 	consumerTag string
 
@@ -45,7 +45,7 @@ func createEndpoint(session *Session, options EndpointOptions) Endpoint {
 		session:     session,
 		Data:        make(chan Event),
 		DataHandler: options.DataHandler,
-		waitGroup:   sync.WaitGroup{},
+		waitGroup:   &sync.WaitGroup{},
 		mu:          &sync.Mutex{},
 	}
 

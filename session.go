@@ -19,7 +19,7 @@ type Session struct {
 	requestChannel *amqp.Channel
 	awaitingReply  map[string]RequestDataHandler
 
-	waitGroup sync.WaitGroup
+	waitGroup *sync.WaitGroup
 
 	Config Config
 }

@@ -95,7 +95,7 @@ func Connect(options ConnectionOptions) Session {
 		publishChannel: publishChannel,
 		requestChannel: requestChannel,
 
-		waitGroup:     sync.WaitGroup{},
+		waitGroup:     &sync.WaitGroup{},
 		awaitingReply: replyList,
 	}
 }
