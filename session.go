@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/oklog/ulid"
 	"github.com/streadway/amqp"
 )
 
@@ -124,7 +124,7 @@ func (session *Session) Emit(key string, data interface{}) {
 		ContentType: "application/json",
 		Body:        j,
 		Timestamp:   time.Now(),
-		MessageId:   uuid.New().String(),
+		MessageId:   ulid.MustNew(ulid.Now(), nil).String(),
 		AppId:       session.Config.Name,
 	}
 

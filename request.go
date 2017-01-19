@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/oklog/ulid"
 	"github.com/streadway/amqp"
 )
 
@@ -43,7 +43,7 @@ func (request Request) send(data interface{}) {
 	j, err := json.Marshal(data)
 	failOnError(err, "Failed making JSON from result")
 
-	messageId := uuid.New().String()
+	messageId := ulid.MustNew(ulid.Now(), nil).String()
 	request.session.registerReply(messageId, request.DataHandler)
 
 	err = request.session.requestChannel.Publish(

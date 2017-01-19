@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/oklog/ulid"
 	"github.com/streadway/amqp"
 )
 
@@ -103,7 +103,7 @@ func (endpoint Endpoint) start() {
 	endpoint.channel, err = endpoint.session.connection.Channel()
 	failOnError(err, "Failed to create channel for consumption")
 
-	endpoint.consumerTag = uuid.New().String()
+	endpoint.consumerTag = ulid.MustNew(ulid.Now(), nil).String()
 	deliveries, err := endpoint.channel.Consume(
 		endpoint.Queue,       // name of the queue
 		endpoint.consumerTag, // consumer tag
@@ -208,7 +208,7 @@ func handleData(endpoint Endpoint, event Event) {
 			ContentType:   "application/json",
 			Body:          j,
 			Timestamp:     time.Now(),
-			MessageId:     uuid.New().String(),
+			MessageId:     ulid.MustNew(ulid.Now(), nil).String(),
 			AppId:         endpoint.session.Config.Name,
 			CorrelationId: event.message.CorrelationId,
 		},
