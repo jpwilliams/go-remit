@@ -78,11 +78,10 @@ func logClosure() {
 	log.Println("      Cancelling again will initiate a cold shutdown and messages may be lost.")
 }
 
-func (session *Session) Endpoint(key string, handler EndpointDataHandler) Endpoint {
+func (session *Session) Endpoint(key string) Endpoint {
 	endpoint := createEndpoint(session, EndpointOptions{
-		RoutingKey:  key,
-		Queue:       key,
-		DataHandler: handler,
+		RoutingKey: key,
+		Queue:      key,
 	})
 
 	return endpoint
