@@ -77,7 +77,7 @@ func (endpoint *Endpoint) getWorkChannel() *amqp.Channel {
 	return endpoint.workChannel
 }
 
-func (endpoint Endpoint) Open() {
+func (endpoint *Endpoint) Open() Endpoint {
 	debug("opening endpoint; declaring queue")
 
 	queue, err := endpoint.getWorkChannel().QueueDeclare(
@@ -121,7 +121,7 @@ func (endpoint Endpoint) Open() {
 
 	failOnError(err, "Failed trying to consume")
 
-	go messageHandler(endpoint, deliveries)
+	go messageHandler(*endpoint, deliveries)
 
 	debug("endpoint opened")
 
@@ -133,9 +133,11 @@ func (endpoint Endpoint) Open() {
 	case endpoint.Ready <- true:
 	default:
 	}
+
+	return *endpoint
 }
 
-func (endpoint *Endpoint) OnData(handler EndpointDataHandler) {
+func (endpoint *Endpoint) OnData(handler EndpointDataHandler) Endpoint {
 	dataChan := make(chan Event)
 	endpoint.mu.Lock()
 	endpoint.dataListeners = append(endpoint.dataListeners, dataChan)
@@ -146,6 +148,8 @@ func (endpoint *Endpoint) OnData(handler EndpointDataHandler) {
 			go handleData(*endpoint, handler, event)
 		}
 	}()
+
+	return *endpoint
 }
 
 func (endpoint Endpoint) Close() {
@@ -163,26 +167,36 @@ func handleData(endpoint Endpoint, handler EndpointDataHandler, event Event) {
 	defer endpoint.session.waitGroup.Done()
 	endpoint.waitGroup.Add(1)
 	defer endpoint.waitGroup.Done()
+	event.waitGroup.Add(1)
+	defer event.waitGroup.Done()
 
 	var retResult interface{}
 	var retErr interface{}
-
-	debug("received " + event.message.MessageId)
 
 	go handler(event)
 
 	select {
 	case retResult = <-event.Success:
+		event.waitGroup.Done()
+		if event.gotResult {
+			return
+		}
+		event.gotResult = true
 	case retErr = <-event.Failure:
+		event.waitGroup.Done()
+		if event.gotResult {
+			return
+		}
+		event.gotResult = true
+	case <-event.Skip:
+		event.waitGroup.Done()
+		return
 	}
 
-	close(event.Success)
-	close(event.Failure)
-
-	if retResult != nil {
-		debug("completed " + event.message.MessageId + " - success")
+	if retErr != nil {
+		debug("failure" + event.message.MessageId)
 	} else {
-		debug("completed" + event.message.MessageId + " - failure")
+		debug("success " + event.message.MessageId)
 	}
 
 	var accumulatedResults [2]interface{}
@@ -201,7 +215,7 @@ func handleData(endpoint Endpoint, handler EndpointDataHandler, event Event) {
 		event.message.ReplyTo, // the queue to assert
 		false, // durable
 		true,  // autoDelete
-		true,  //exclusive
+		true,  // exclusive
 		false, // noWait
 		nil,   // arguments
 	)
@@ -235,11 +249,14 @@ func handleData(endpoint Endpoint, handler EndpointDataHandler, event Event) {
 
 func messageHandler(endpoint Endpoint, deliveries <-chan amqp.Delivery) {
 	for d := range deliveries {
-		debug("received message")
-
 		parsedData := EventData{}
 		err := json.Unmarshal(d.Body, &parsedData)
-		failOnError(err, "Failed to parse JSON")
+		if err != nil {
+			fmt.Println("Failed to parse JSON " + d.MessageId)
+			fmt.Println(err)
+			d.Nack(false, false)
+			continue
+		}
 
 		event := Event{
 			EventId:   d.MessageId,
@@ -248,10 +265,21 @@ func messageHandler(endpoint Endpoint, deliveries <-chan amqp.Delivery) {
 			Data:      parsedData,
 			Success:   make(chan interface{}, 1),
 			Failure:   make(chan interface{}, 1),
+			Skip:      make(chan bool, 1),
+
 			message:   d,
+			waitGroup: &sync.WaitGroup{},
 		}
 
-		fmt.Println(endpoint.dataListeners)
+		event.waitGroup.Add(len(endpoint.dataListeners))
+
+		go func() {
+			event.waitGroup.Wait()
+			close(event.Success)
+			close(event.Failure)
+			close(event.Skip)
+			event.Skip <- true
+		}()
 
 		for _, listener := range endpoint.dataListeners {
 			select {
