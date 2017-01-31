@@ -6,7 +6,10 @@ import (
 	"sync"
 
 	"github.com/streadway/amqp"
+	. "github.com/tj/go-debug"
 )
+
+var debug = Debug("remit")
 
 type ConnectionOptions struct {
 	Url  string
@@ -14,6 +17,8 @@ type ConnectionOptions struct {
 }
 
 func Connect(options ConnectionOptions) Session {
+	debug("connecting to amq")
+
 	conn, err := amqp.Dial(options.Url)
 	failOnError(err, "Failed to connect to RabbitMQ")
 

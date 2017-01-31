@@ -13,12 +13,13 @@ import (
 // Endpoint manages the RPC-style consumption and
 // publishing of messages.
 type Endpoint struct {
-	session     *Session
-	channel     *amqp.Channel
-	workChannel *amqp.Channel
-	waitGroup   *sync.WaitGroup
-	mu          *sync.Mutex
-	consumerTag string
+	session       *Session
+	channel       *amqp.Channel
+	workChannel   *amqp.Channel
+	waitGroup     *sync.WaitGroup
+	mu            *sync.Mutex
+	consumerTag   string
+	dataListeners []chan Event
 
 	RoutingKey string
 	Queue      string
@@ -39,17 +40,16 @@ type EndpointOptions struct {
 type EndpointDataHandler func(Event)
 
 func createEndpoint(session *Session, options EndpointOptions) Endpoint {
-	endpoint := Endpoint{
-		RoutingKey:  options.RoutingKey,
-		Queue:       options.Queue,
-		session:     session,
-		Data:        make(chan Event),
-		DataHandler: options.DataHandler,
-		waitGroup:   &sync.WaitGroup{},
-		mu:          &sync.Mutex{},
-	}
+	debug("creating endpoint")
 
-	go endpoint.start()
+	endpoint := Endpoint{
+		RoutingKey: options.RoutingKey,
+		Queue:      options.Queue,
+		session:    session,
+		Data:       make(chan Event),
+		waitGroup:  &sync.WaitGroup{},
+		mu:         &sync.Mutex{},
+	}
 
 	return endpoint
 }
@@ -77,7 +77,9 @@ func (endpoint *Endpoint) getWorkChannel() *amqp.Channel {
 	return endpoint.workChannel
 }
 
-func (endpoint Endpoint) start() {
+func (endpoint *Endpoint) Open() Endpoint {
+	debug("opening endpoint; declaring queue")
+
 	queue, err := endpoint.getWorkChannel().QueueDeclare(
 		endpoint.Queue, // name of the queue
 		true,           // durable
@@ -90,6 +92,7 @@ func (endpoint Endpoint) start() {
 	failOnError(err, "Could not create endpoint queue")
 	endpoint.Queue = queue.Name
 
+	debug("opening endpoint; binding queue")
 	err = endpoint.getWorkChannel().QueueBind(
 		endpoint.Queue,      // name of the queue
 		endpoint.RoutingKey, // routing key to use
@@ -100,9 +103,11 @@ func (endpoint Endpoint) start() {
 
 	failOnError(err, "Could not bind queue to routing key")
 
+	debug("opening endpoint; setting endpoint channel")
 	endpoint.channel, err = endpoint.session.connection.Channel()
 	failOnError(err, "Failed to create channel for consumption")
 
+	debug("opening endpoint; consuming")
 	endpoint.consumerTag = ulid.MustNew(ulid.Now(), nil).String()
 	deliveries, err := endpoint.channel.Consume(
 		endpoint.Queue,       // name of the queue
@@ -116,13 +121,9 @@ func (endpoint Endpoint) start() {
 
 	failOnError(err, "Failed trying to consume")
 
-	go func() {
-		for event := range endpoint.Data {
-			go handleData(endpoint, event)
-		}
-	}()
+	go messageHandler(*endpoint, deliveries)
 
-	go messageHandler(endpoint, deliveries)
+	debug("endpoint opened")
 
 	// Have made this non-blocking (so will ignore if
 	// no ready listener is set up).
@@ -132,6 +133,27 @@ func (endpoint Endpoint) start() {
 	case endpoint.Ready <- true:
 	default:
 	}
+
+	return *endpoint
+}
+
+func (endpoint *Endpoint) OnData(handlers ...EndpointDataHandler) Endpoint {
+	if len(handlers) == 0 {
+		panic("Failed to create endpoint data handler with no functions")
+	}
+
+	dataChan := make(chan Event)
+	endpoint.mu.Lock()
+	endpoint.dataListeners = append(endpoint.dataListeners, dataChan)
+	endpoint.mu.Unlock()
+
+	go func() {
+		for event := range dataChan {
+			go handleData(*endpoint, handlers, &event)
+		}
+	}()
+
+	return *endpoint
 }
 
 func (endpoint Endpoint) Close() {
@@ -144,31 +166,34 @@ func (endpoint Endpoint) Close() {
 	close(endpoint.Ready)
 }
 
-func handleData(endpoint Endpoint, event Event) {
+func handleData(endpoint Endpoint, handlers []EndpointDataHandler, event *Event) {
 	endpoint.session.waitGroup.Add(1)
 	defer endpoint.session.waitGroup.Done()
 	endpoint.waitGroup.Add(1)
 	defer endpoint.waitGroup.Done()
+	event.waitGroup.Add(1)
+	defer event.waitGroup.Done()
 
 	var retResult interface{}
 	var retErr interface{}
 
-	fmt.Println("Received", event.message.MessageId)
+runner:
+	for _, handler := range handlers {
+		go handler(*event)
 
-	go endpoint.DataHandler(event)
-
-	select {
-	case retResult = <-event.Success:
-	case retErr = <-event.Failure:
+		select {
+		case retResult = <-event.Success:
+			break runner
+		case retErr = <-event.Failure:
+			break runner
+		case <-event.Next:
+		}
 	}
 
-	close(event.Success)
-	close(event.Failure)
-
-	if retResult != nil {
-		fmt.Println("Completed", event.message.MessageId, "- success")
+	if retErr != nil {
+		debug("failure" + event.message.MessageId)
 	} else {
-		fmt.Println("Completed", event.message.MessageId, "- failure")
+		debug("success " + event.message.MessageId)
 	}
 
 	var accumulatedResults [2]interface{}
@@ -187,7 +212,7 @@ func handleData(endpoint Endpoint, event Event) {
 		event.message.ReplyTo, // the queue to assert
 		false, // durable
 		true,  // autoDelete
-		true,  //exclusive
+		true,  // exclusive
 		false, // noWait
 		nil,   // arguments
 	)
@@ -223,7 +248,12 @@ func messageHandler(endpoint Endpoint, deliveries <-chan amqp.Delivery) {
 	for d := range deliveries {
 		parsedData := EventData{}
 		err := json.Unmarshal(d.Body, &parsedData)
-		failOnError(err, "Failed to parse JSON")
+		if err != nil {
+			fmt.Println("Failed to parse JSON " + d.MessageId)
+			fmt.Println(err)
+			d.Nack(false, false)
+			continue
+		}
 
 		event := Event{
 			EventId:   d.MessageId,
@@ -232,9 +262,26 @@ func messageHandler(endpoint Endpoint, deliveries <-chan amqp.Delivery) {
 			Data:      parsedData,
 			Success:   make(chan interface{}, 1),
 			Failure:   make(chan interface{}, 1),
+			Next:      make(chan bool, 1),
+
 			message:   d,
+			waitGroup: &sync.WaitGroup{},
 		}
 
-		endpoint.Data <- event
+		event.waitGroup.Add(len(endpoint.dataListeners))
+
+		go func() {
+			event.waitGroup.Wait()
+			close(event.Success)
+			close(event.Failure)
+			close(event.Next)
+		}()
+
+		for _, listener := range endpoint.dataListeners {
+			select {
+			case listener <- event:
+			default:
+			}
+		}
 	}
 }

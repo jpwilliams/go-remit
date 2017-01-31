@@ -1,11 +1,15 @@
 package remit
 
 import (
+	"sync"
+
 	"github.com/streadway/amqp"
 )
 
 type Event struct {
-	message amqp.Delivery
+	message   amqp.Delivery
+	waitGroup *sync.WaitGroup
+	gotResult bool
 
 	EventId   string
 	EventType string
@@ -14,6 +18,7 @@ type Event struct {
 
 	Success chan interface{}
 	Failure chan interface{}
+	Next    chan bool
 }
 
 type EventData map[string]interface{}
