@@ -137,7 +137,11 @@ func (endpoint *Endpoint) Open() Endpoint {
 	return *endpoint
 }
 
-func (endpoint *Endpoint) OnData(handler EndpointDataHandler) Endpoint {
+func (endpoint *Endpoint) OnData(handlers ...EndpointDataHandler) Endpoint {
+	if len(handlers) == 0 {
+		panic("Failed to create endpoint data handler with no functions")
+	}
+
 	dataChan := make(chan Event)
 	endpoint.mu.Lock()
 	endpoint.dataListeners = append(endpoint.dataListeners, dataChan)
@@ -145,7 +149,7 @@ func (endpoint *Endpoint) OnData(handler EndpointDataHandler) Endpoint {
 
 	go func() {
 		for event := range dataChan {
-			go handleData(*endpoint, handler, event)
+			go handleData(*endpoint, handlers, &event)
 		}
 	}()
 
@@ -162,7 +166,7 @@ func (endpoint Endpoint) Close() {
 	close(endpoint.Ready)
 }
 
-func handleData(endpoint Endpoint, handler EndpointDataHandler, event Event) {
+func handleData(endpoint Endpoint, handlers []EndpointDataHandler, event *Event) {
 	endpoint.session.waitGroup.Add(1)
 	defer endpoint.session.waitGroup.Done()
 	endpoint.waitGroup.Add(1)
@@ -173,24 +177,17 @@ func handleData(endpoint Endpoint, handler EndpointDataHandler, event Event) {
 	var retResult interface{}
 	var retErr interface{}
 
-	go handler(event)
+runner:
+	for _, handler := range handlers {
+		go handler(*event)
 
-	select {
-	case retResult = <-event.Success:
-		event.waitGroup.Done()
-		if event.gotResult {
-			return
+		select {
+		case retResult = <-event.Success:
+			break runner
+		case retErr = <-event.Failure:
+			break runner
+		case <-event.Next:
 		}
-		event.gotResult = true
-	case retErr = <-event.Failure:
-		event.waitGroup.Done()
-		if event.gotResult {
-			return
-		}
-		event.gotResult = true
-	case <-event.Skip:
-		event.waitGroup.Done()
-		return
 	}
 
 	if retErr != nil {
@@ -265,7 +262,7 @@ func messageHandler(endpoint Endpoint, deliveries <-chan amqp.Delivery) {
 			Data:      parsedData,
 			Success:   make(chan interface{}, 1),
 			Failure:   make(chan interface{}, 1),
-			Skip:      make(chan bool, 1),
+			Next:      make(chan bool, 1),
 
 			message:   d,
 			waitGroup: &sync.WaitGroup{},
@@ -277,7 +274,7 @@ func messageHandler(endpoint Endpoint, deliveries <-chan amqp.Delivery) {
 			event.waitGroup.Wait()
 			close(event.Success)
 			close(event.Failure)
-			close(event.Skip)
+			close(event.Next)
 		}()
 
 		for _, listener := range endpoint.dataListeners {

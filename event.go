@@ -18,7 +18,7 @@ type Event struct {
 
 	Success chan interface{}
 	Failure chan interface{}
-	Skip    chan bool
+	Next    chan bool
 }
 
 type EventData map[string]interface{}
