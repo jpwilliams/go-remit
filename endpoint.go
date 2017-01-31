@@ -278,7 +278,6 @@ func messageHandler(endpoint Endpoint, deliveries <-chan amqp.Delivery) {
 			close(event.Success)
 			close(event.Failure)
 			close(event.Skip)
-			event.Skip <- true
 		}()
 
 		for _, listener := range endpoint.dataListeners {
