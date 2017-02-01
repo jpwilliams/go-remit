@@ -105,18 +105,3 @@ func Connect(options ConnectionOptions) Session {
 		awaitingReply: replyList,
 	}
 }
-
-func createChannel(connection *amqp.Connection) *amqp.Channel {
-	channel, err := connection.Channel()
-	failOnError(err, "Failed to create channel")
-
-	closing := channel.NotifyClose(make(chan *amqp.Error))
-
-	go func() {
-		for cl := range closing {
-			log.Println("Closed", cl.Reason)
-		}
-	}()
-
-	return channel
-}
