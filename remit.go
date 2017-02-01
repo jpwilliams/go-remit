@@ -51,7 +51,7 @@ func Connect(options ConnectionOptions) Session {
 	requestChannel, err := conn.Channel()
 	failOnError(err, "Failed to open replies channel")
 
-	replyList := make(map[string]RequestDataHandler)
+	replyList := make(map[string]chan Event)
 
 	replies, err := requestChannel.Consume(
 		"amq.rabbitmq.reply-to", // name of the queue
@@ -66,15 +66,15 @@ func Connect(options ConnectionOptions) Session {
 
 	go func() {
 		for reply := range replies {
-			handler := replyList[reply.CorrelationId]
+			returnChannel := replyList[reply.CorrelationId]
 
-			if handler == nil {
+			if returnChannel == nil {
 				continue
 			}
 
 			delete(replyList, reply.CorrelationId)
 
-			parsedData := EventData{}
+			var parsedData interface{}
 			json.Unmarshal(reply.Body, &parsedData)
 			failOnError(err, "Failed to parse JSON")
 
@@ -86,7 +86,10 @@ func Connect(options ConnectionOptions) Session {
 				message:   reply,
 			}
 
-			go handler(event)
+			select {
+			case returnChannel <- event:
+			default:
+			}
 		}
 	}()
 

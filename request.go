@@ -10,8 +10,9 @@ import (
 )
 
 type Request struct {
-	session   *Session
-	waitGroup *sync.WaitGroup
+	returnChannel chan Event
+	session       *Session
+	waitGroup     *sync.WaitGroup
 
 	RoutingKey string
 
@@ -19,6 +20,8 @@ type Request struct {
 }
 
 type RequestOptions struct {
+	returnChannel chan Event
+
 	RoutingKey string
 	Data       interface{}
 
@@ -29,9 +32,9 @@ type RequestDataHandler func(Event)
 
 func createRequest(session *Session, options RequestOptions) Request {
 	request := Request{
-		RoutingKey:  options.RoutingKey,
-		session:     session,
-		DataHandler: options.DataHandler,
+		RoutingKey:    options.RoutingKey,
+		session:       session,
+		returnChannel: make(chan Event, 1),
 	}
 
 	go request.send(options.Data)
@@ -44,7 +47,7 @@ func (request Request) send(data interface{}) {
 	failOnError(err, "Failed making JSON from result")
 
 	messageId := ulid.MustNew(ulid.Now(), nil).String()
-	request.session.registerReply(messageId, request.DataHandler)
+	request.session.registerReply(messageId, request.returnChannel)
 
 	err = request.session.requestChannel.Publish(
 		"remit",            // exchange

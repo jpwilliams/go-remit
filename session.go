@@ -18,7 +18,7 @@ type Session struct {
 	connection     *amqp.Connection
 	publishChannel *amqp.Channel
 	requestChannel *amqp.Channel
-	awaitingReply  map[string]RequestDataHandler
+	awaitingReply  map[string]chan Event
 
 	waitGroup *sync.WaitGroup
 	mu        *sync.Mutex
@@ -157,14 +157,13 @@ func (session *Session) Emit(key string, data interface{}) {
 	failOnError(err, "Failed to emit message")
 }
 
-func (session *Session) Request(key string, data interface{}, handler RequestDataHandler) Request {
+func (session *Session) Request(key string, data interface{}) chan Event {
 	request := createRequest(session, RequestOptions{
-		RoutingKey:  key,
-		DataHandler: handler,
-		Data:        data,
+		RoutingKey: key,
+		Data:       data,
 	})
 
-	return request
+	return request.returnChannel
 }
 
 func (session *Session) Listener(key string) Endpoint {
