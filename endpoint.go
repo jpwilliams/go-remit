@@ -47,6 +47,7 @@ func createEndpoint(session *Session, options EndpointOptions) Endpoint {
 		Queue:      options.Queue,
 		session:    session,
 		Data:       make(chan Event),
+		Ready:      make(chan bool),
 		waitGroup:  &sync.WaitGroup{},
 		mu:         &sync.Mutex{},
 	}
@@ -78,7 +79,8 @@ func (endpoint *Endpoint) getWorkChannel() *amqp.Channel {
 }
 
 func (endpoint *Endpoint) Open() Endpoint {
-	debug("opening endpoint; declaring queue")
+	endpoint.Data = make(chan Event)
+	endpoint.Ready = make(chan bool)
 
 	queue, err := endpoint.getWorkChannel().QueueDeclare(
 		endpoint.Queue, // name of the queue
@@ -92,7 +94,6 @@ func (endpoint *Endpoint) Open() Endpoint {
 	failOnError(err, "Could not create endpoint queue")
 	endpoint.Queue = queue.Name
 
-	debug("opening endpoint; binding queue")
 	err = endpoint.getWorkChannel().QueueBind(
 		endpoint.Queue,      // name of the queue
 		endpoint.RoutingKey, // routing key to use
@@ -103,11 +104,18 @@ func (endpoint *Endpoint) Open() Endpoint {
 
 	failOnError(err, "Could not bind queue to routing key")
 
-	debug("opening endpoint; setting endpoint channel")
 	endpoint.channel, err = endpoint.session.connection.Channel()
 	failOnError(err, "Failed to create channel for consumption")
 
-	debug("opening endpoint; consuming")
+	// watch for consume channel closure
+	waitForClose := make(chan *amqp.Error, 0)
+	endpoint.channel.NotifyClose(waitForClose)
+
+	go func() {
+		err := <-waitForClose
+		panic(err)
+	}()
+
 	endpoint.consumerTag = ulid.MustNew(ulid.Now(), nil).String()
 	deliveries, err := endpoint.channel.Consume(
 		endpoint.Queue,       // name of the queue
@@ -122,8 +130,6 @@ func (endpoint *Endpoint) Open() Endpoint {
 	failOnError(err, "Failed trying to consume")
 
 	go messageHandler(*endpoint, deliveries)
-
-	debug("endpoint opened")
 
 	// Have made this non-blocking (so will ignore if
 	// no ready listener is set up).
@@ -149,7 +155,7 @@ func (endpoint *Endpoint) OnData(handlers ...EndpointDataHandler) Endpoint {
 
 	go func() {
 		for event := range dataChan {
-			go handleData(*endpoint, handlers, &event)
+			go handleData(*endpoint, handlers, event)
 		}
 	}()
 
@@ -158,15 +164,16 @@ func (endpoint *Endpoint) OnData(handlers ...EndpointDataHandler) Endpoint {
 
 func (endpoint Endpoint) Close() {
 	err := endpoint.channel.Cancel(endpoint.consumerTag, false)
-	failOnError(err, "Failed to clean up consume channel handler")
+	failOnError(err, "Failed to cancel consume channel for endpoint")
 	endpoint.waitGroup.Wait()
 	err = endpoint.channel.Close()
 	failOnError(err, "Failed to close consume channel for endpoint")
+	endpoint.channel = nil
 	close(endpoint.Data)
 	close(endpoint.Ready)
 }
 
-func handleData(endpoint Endpoint, handlers []EndpointDataHandler, event *Event) {
+func handleData(endpoint Endpoint, handlers []EndpointDataHandler, event Event) {
 	endpoint.session.waitGroup.Add(1)
 	defer endpoint.session.waitGroup.Done()
 	endpoint.waitGroup.Add(1)
@@ -179,7 +186,7 @@ func handleData(endpoint Endpoint, handlers []EndpointDataHandler, event *Event)
 
 runner:
 	for _, handler := range handlers {
-		go handler(*event)
+		go handler(event)
 
 		select {
 		case retResult = <-event.Success:
@@ -278,10 +285,7 @@ func messageHandler(endpoint Endpoint, deliveries <-chan amqp.Delivery) {
 		}()
 
 		for _, listener := range endpoint.dataListeners {
-			select {
-			case listener <- event:
-			default:
-			}
+			listener <- event
 		}
 	}
 }
