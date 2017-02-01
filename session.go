@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -20,6 +21,9 @@ type Session struct {
 	awaitingReply  map[string]RequestDataHandler
 
 	waitGroup *sync.WaitGroup
+	mu        *sync.Mutex
+
+	listenerCount int
 
 	Config Config
 }
@@ -80,8 +84,9 @@ func logClosure() {
 
 func (session *Session) Endpoint(key string) Endpoint {
 	endpoint := createEndpoint(session, EndpointOptions{
-		RoutingKey: key,
-		Queue:      key,
+		RoutingKey:  key,
+		Queue:       key,
+		shouldReply: true,
 	})
 
 	return endpoint
@@ -100,11 +105,13 @@ func (session *Session) EndpointWithOptions(options EndpointOptions) Endpoint {
 		}
 	}
 
-	return Endpoint{
-		RoutingKey: options.RoutingKey,
-		Queue:      options.Queue,
-		session:    session,
-	}
+	endpoint := createEndpoint(session, EndpointOptions{
+		RoutingKey:  options.RoutingKey,
+		Queue:       options.Queue,
+		shouldReply: true,
+	})
+
+	return endpoint
 }
 
 func (session *Session) LazyEndpoint(key string, handlers ...EndpointDataHandler) Endpoint {
@@ -112,11 +119,7 @@ func (session *Session) LazyEndpoint(key string, handlers ...EndpointDataHandler
 		panic("No handlers given for lazy endpoint instantiation")
 	}
 
-	endpoint := createEndpoint(session, EndpointOptions{
-		RoutingKey: key,
-		Queue:      key,
-	})
-
+	endpoint := session.Endpoint(key)
 	endpoint.OnData(handlers...)
 	endpoint.Open()
 
@@ -162,4 +165,31 @@ func (session *Session) Request(key string, data interface{}, handler RequestDat
 	})
 
 	return request
+}
+
+func (session *Session) Listener(key string) Endpoint {
+	session.mu.Lock()
+	session.listenerCount = session.listenerCount + 1
+	queue := key + ":l:" + session.Config.Name + ":" + strconv.Itoa(session.listenerCount)
+	session.mu.Unlock()
+
+	listener := createEndpoint(session, EndpointOptions{
+		RoutingKey:  key,
+		Queue:       queue,
+		shouldReply: false,
+	})
+
+	return listener
+}
+
+func (session *Session) LazyListener(key string, handlers ...EndpointDataHandler) Endpoint {
+	if len(handlers) == 0 {
+		panic("No handlers given for lazy listener instantiation")
+	}
+
+	listener := session.Listener(key)
+	listener.OnData(handlers...)
+	listener.Open()
+
+	return listener
 }

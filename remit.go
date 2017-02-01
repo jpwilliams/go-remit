@@ -101,6 +101,7 @@ func Connect(options ConnectionOptions) Session {
 		requestChannel: requestChannel,
 
 		waitGroup:     &sync.WaitGroup{},
+		mu:            &sync.Mutex{},
 		awaitingReply: replyList,
 	}
 }

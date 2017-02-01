@@ -20,6 +20,7 @@ type Endpoint struct {
 	mu            *sync.Mutex
 	consumerTag   string
 	dataListeners []chan Event
+	shouldReply   bool
 
 	RoutingKey string
 	Queue      string
@@ -31,6 +32,8 @@ type Endpoint struct {
 }
 
 type EndpointOptions struct {
+	shouldReply bool
+
 	RoutingKey string
 	Queue      string
 
@@ -43,13 +46,14 @@ func createEndpoint(session *Session, options EndpointOptions) Endpoint {
 	debug("creating endpoint")
 
 	endpoint := Endpoint{
-		RoutingKey: options.RoutingKey,
-		Queue:      options.Queue,
-		session:    session,
-		Data:       make(chan Event),
-		Ready:      make(chan bool),
-		waitGroup:  &sync.WaitGroup{},
-		mu:         &sync.Mutex{},
+		RoutingKey:  options.RoutingKey,
+		Queue:       options.Queue,
+		session:     session,
+		Data:        make(chan Event),
+		Ready:       make(chan bool),
+		waitGroup:   &sync.WaitGroup{},
+		mu:          &sync.Mutex{},
+		shouldReply: options.shouldReply,
 	}
 
 	return endpoint
@@ -71,8 +75,9 @@ func (endpoint *Endpoint) getWorkChannel() *amqp.Channel {
 		waitForClose := make(chan *amqp.Error, 0)
 		endpoint.workChannel.NotifyClose(waitForClose)
 		<-waitForClose
+		endpoint.mu.Lock()
 		endpoint.workChannel = nil
-		endpoint.getWorkChannel()
+		endpoint.mu.Unlock()
 	}()
 
 	return endpoint.workChannel
@@ -203,17 +208,17 @@ runner:
 		debug("success " + event.message.MessageId)
 	}
 
+	if !endpoint.shouldReply || event.message.ReplyTo == "" || event.message.CorrelationId == "" {
+		event.message.Ack(false)
+		return
+	}
+
 	var accumulatedResults [2]interface{}
 	accumulatedResults[0] = retErr
 	accumulatedResults[1] = retResult
 
 	j, err := json.Marshal(accumulatedResults)
 	failOnError(err, "Failed making JSON from result")
-
-	if event.message.ReplyTo == "" || event.message.CorrelationId == "" {
-		event.message.Ack(false)
-		return
-	}
 
 	queue, err := endpoint.getWorkChannel().QueueDeclarePassive(
 		event.message.ReplyTo, // the queue to assert
