@@ -107,6 +107,22 @@ func (session *Session) EndpointWithOptions(options EndpointOptions) Endpoint {
 	}
 }
 
+func (session *Session) LazyEndpoint(key string, handlers ...EndpointDataHandler) Endpoint {
+	if len(handlers) == 0 {
+		panic("No handlers given for lazy endpoint instantiation")
+	}
+
+	endpoint := createEndpoint(session, EndpointOptions{
+		RoutingKey: key,
+		Queue:      key,
+	})
+
+	endpoint.OnData(handlers...)
+	endpoint.Open()
+
+	return endpoint
+}
+
 func (session *Session) Emit(key string, data interface{}) {
 	if key == "" {
 		panic("No valid routing key given for emission")
