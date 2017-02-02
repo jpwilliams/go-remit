@@ -1,16 +1,13 @@
 package remit
 
 import (
-	"encoding/json"
 	"log"
 	"os"
 	"os/signal"
 	"strconv"
 	"sync"
 	"syscall"
-	"time"
 
-	"github.com/oklog/ulid"
 	"github.com/streadway/amqp"
 )
 
@@ -22,7 +19,8 @@ type Session struct {
 	connection     *amqp.Connection
 	publishChannel *amqp.Channel
 	requestChannel *amqp.Channel
-	awaitingReply  map[string]RequestDataHandler
+	awaitingReply  map[string]chan Event
+	workerPool     *workerPool
 
 	waitGroup *sync.WaitGroup
 	mu        *sync.Mutex
@@ -230,45 +228,37 @@ func (session *Session) LazyEndpoint(key string, handlers ...EndpointDataHandler
 //
 // 	remitSession.Emit("service.connected", "my-service-id")
 //
-func (session *Session) Emit(key string, data interface{}) {
-	if key == "" {
-		panic("No valid routing key given for emission")
-	}
 
-	session.waitGroup.Add(1)
-	defer session.waitGroup.Done()
+func (session *Session) Emit(key string) chan interface{} {
+	emit := createEmission(session, EmitOptions{
+		RoutingKey: key,
+	})
 
-	j, err := json.Marshal(data)
-	failOnError(err, "Failed making JSON from emission data")
-
-	message := amqp.Publishing{
-		Headers:     amqp.Table{},
-		ContentType: "application/json",
-		Body:        j,
-		Timestamp:   time.Now(),
-		MessageId:   ulid.MustNew(ulid.Now(), nil).String(),
-		AppId:       session.Config.Name,
-	}
-
-	err = session.publishChannel.Publish(
-		"remit", // exchange
-		key,     // routing key
-		false,   // mandatory
-		false,   // immediate
-		message, // message
-	)
-
-	failOnError(err, "Failed to emit message")
+	return emit.Channel
 }
 
-func (session *Session) Request(key string, data interface{}, handler RequestDataHandler) Request {
+func (session *Session) LazyEmit(key string, data interface{}) {
+	emit := createEmission(session, EmitOptions{
+		RoutingKey: key,
+	})
+
+	emit.Channel <- data
+}
+
+func (session *Session) Request(key string) Request {
 	request := createRequest(session, RequestOptions{
-		RoutingKey:  key,
-		DataHandler: handler,
-		Data:        data,
+		RoutingKey: key,
 	})
 
 	return request
+}
+
+func (session *Session) LazyRequest(key string, data interface{}) chan Event {
+	request := createRequest(session, RequestOptions{
+		RoutingKey: key,
+	})
+
+	return request.Send(data)
 }
 
 func (session *Session) Listener(key string) Endpoint {

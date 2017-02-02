@@ -7,14 +7,16 @@ import (
 )
 
 type Event struct {
-	message   amqp.Delivery
-	waitGroup *sync.WaitGroup
-	gotResult bool
+	message     amqp.Delivery
+	waitGroup   *sync.WaitGroup
+	gotResult   bool
+	workChannel chan *amqp.Channel
 
 	EventId   string
 	EventType string
 	Resource  string
 	Data      EventData
+	Error     interface{}
 
 	Success chan interface{}
 	Failure chan interface{}
