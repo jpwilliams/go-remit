@@ -51,7 +51,7 @@ func Connect(options ConnectionOptions) Session {
 	requestChannel, err := conn.Channel()
 	failOnError(err, "Failed to open replies channel")
 
-	replyList := make(map[string]RequestDataHandler)
+	replyList := make(map[string]chan Event)
 
 	replies, err := requestChannel.Consume(
 		"amq.rabbitmq.reply-to", // name of the queue
@@ -66,31 +66,39 @@ func Connect(options ConnectionOptions) Session {
 
 	go func() {
 		for reply := range replies {
-			handler := replyList[reply.CorrelationId]
+			returnChannel := replyList[reply.CorrelationId]
 
-			if handler == nil {
+			if returnChannel == nil {
 				continue
 			}
 
 			delete(replyList, reply.CorrelationId)
 
-			parsedData := EventData{}
+			var parsedData []EventData
 			json.Unmarshal(reply.Body, &parsedData)
-			failOnError(err, "Failed to parse JSON")
+			failOnError(err, "Failed to parse JSON for reply")
 
 			event := Event{
 				EventId:   reply.MessageId,
 				EventType: reply.RoutingKey,
 				Resource:  reply.AppId,
-				Data:      parsedData,
 				message:   reply,
 			}
 
-			go handler(event)
+			if parsedData[0] != nil {
+				event.Error = parsedData[0]
+			} else {
+				event.Data = parsedData[1]
+			}
+
+			select {
+			case returnChannel <- event:
+			default:
+			}
 		}
 	}()
 
-	return Session{
+	session := Session{
 		Config: Config{
 			Name: options.Name,
 			Url:  options.Url,
@@ -103,7 +111,10 @@ func Connect(options ConnectionOptions) Session {
 		waitGroup:     &sync.WaitGroup{},
 		mu:            &sync.Mutex{},
 		awaitingReply: replyList,
+		workerPool:    newWorkerPool(1, 5, conn),
 	}
+
+	return session
 }
 
 func createChannel(connection *amqp.Connection) *amqp.Channel {
