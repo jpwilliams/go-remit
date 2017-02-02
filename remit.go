@@ -74,16 +74,21 @@ func Connect(options ConnectionOptions) Session {
 
 			delete(replyList, reply.CorrelationId)
 
-			var parsedData interface{}
+			var parsedData []EventData
 			json.Unmarshal(reply.Body, &parsedData)
-			failOnError(err, "Failed to parse JSON")
+			failOnError(err, "Failed to parse JSON for reply")
 
 			event := Event{
 				EventId:   reply.MessageId,
 				EventType: reply.RoutingKey,
 				Resource:  reply.AppId,
-				Data:      parsedData,
 				message:   reply,
+			}
+
+			if parsedData[0] != nil {
+				event.Error = parsedData[0]
+			} else {
+				event.Data = parsedData[1]
 			}
 
 			select {
@@ -93,7 +98,7 @@ func Connect(options ConnectionOptions) Session {
 		}
 	}()
 
-	return Session{
+	session := Session{
 		Config: Config{
 			Name: options.Name,
 			Url:  options.Url,
@@ -106,7 +111,12 @@ func Connect(options ConnectionOptions) Session {
 		waitGroup:     &sync.WaitGroup{},
 		mu:            &sync.Mutex{},
 		awaitingReply: replyList,
+		workers:       make(chan *amqp.Channel, 1),
 	}
+
+	go session.startGeneratingWorkers()
+
+	return session
 }
 
 func createChannel(connection *amqp.Connection) *amqp.Channel {

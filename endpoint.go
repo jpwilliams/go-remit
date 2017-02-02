@@ -15,7 +15,6 @@ import (
 type Endpoint struct {
 	session       *Session
 	channel       *amqp.Channel
-	workChannel   *amqp.Channel
 	waitGroup     *sync.WaitGroup
 	mu            *sync.Mutex
 	consumerTag   string
@@ -59,35 +58,13 @@ func createEndpoint(session *Session, options EndpointOptions) Endpoint {
 	return endpoint
 }
 
-func (endpoint *Endpoint) getWorkChannel() *amqp.Channel {
-	endpoint.mu.Lock()
-	defer endpoint.mu.Unlock()
-
-	if endpoint.workChannel != nil {
-		return endpoint.workChannel
-	}
-
-	var err error
-	endpoint.workChannel, err = endpoint.session.connection.Channel()
-	failOnError(err, "Failed to create work channel for endpoint")
-
-	go func() {
-		waitForClose := make(chan *amqp.Error, 0)
-		endpoint.workChannel.NotifyClose(waitForClose)
-		<-waitForClose
-		endpoint.mu.Lock()
-		endpoint.workChannel = nil
-		endpoint.mu.Unlock()
-	}()
-
-	return endpoint.workChannel
-}
-
 func (endpoint *Endpoint) Open() Endpoint {
 	endpoint.Data = make(chan Event)
 	endpoint.Ready = make(chan bool)
 
-	queue, err := endpoint.getWorkChannel().QueueDeclare(
+	workChannel := <-endpoint.session.workers
+	defer workChannel.Close()
+	queue, err := workChannel.QueueDeclare(
 		endpoint.Queue, // name of the queue
 		true,           // durable
 		false,          // autoDelete
@@ -95,11 +72,10 @@ func (endpoint *Endpoint) Open() Endpoint {
 		false,          // noWait
 		nil,            // arguments
 	)
-
 	failOnError(err, "Could not create endpoint queue")
 	endpoint.Queue = queue.Name
 
-	err = endpoint.getWorkChannel().QueueBind(
+	err = workChannel.QueueBind(
 		endpoint.Queue,      // name of the queue
 		endpoint.RoutingKey, // routing key to use
 		"remit",             // exchange
@@ -179,6 +155,8 @@ func (endpoint Endpoint) Close() {
 }
 
 func handleData(endpoint Endpoint, handlers []EndpointDataHandler, event Event) {
+	fmt.Println("handling data for", event.message.DeliveryTag)
+
 	endpoint.session.waitGroup.Add(1)
 	defer endpoint.session.waitGroup.Done()
 	endpoint.waitGroup.Add(1)
@@ -220,7 +198,11 @@ runner:
 	j, err := json.Marshal(accumulatedResults)
 	failOnError(err, "Failed making JSON from result")
 
-	queue, err := endpoint.getWorkChannel().QueueDeclarePassive(
+	// fmt.Println(event.message.DeliveryTag, "queuing")
+	// fmt.Println(event.message.DeliveryTag, "checking")
+	workChannel := <-endpoint.session.workers
+	defer workChannel.Close()
+	queue, err := workChannel.QueueDeclarePassive(
 		event.message.ReplyTo, // the queue to assert
 		false, // durable
 		true,  // autoDelete
@@ -228,9 +210,9 @@ runner:
 		false, // noWait
 		nil,   // arguments
 	)
-
 	if err != nil {
 		fmt.Println("Reply consumer no longer present; skipping")
+		fmt.Println(err)
 		event.message.Ack(false)
 		return
 	}
@@ -258,7 +240,7 @@ runner:
 
 func messageHandler(endpoint Endpoint, deliveries <-chan amqp.Delivery) {
 	for d := range deliveries {
-		parsedData := EventData{}
+		var parsedData EventData
 		err := json.Unmarshal(d.Body, &parsedData)
 		if err != nil {
 			fmt.Println("Failed to parse JSON " + d.MessageId)
