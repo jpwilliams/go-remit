@@ -16,7 +16,7 @@ type Session struct {
 	publishChannel *amqp.Channel
 	requestChannel *amqp.Channel
 	awaitingReply  map[string]chan Event
-	workers        chan *amqp.Channel
+	workerPool     *workerPool
 
 	waitGroup *sync.WaitGroup
 	mu        *sync.Mutex
@@ -28,15 +28,6 @@ type Session struct {
 
 func (session *Session) registerReply(correlationId string, returnChannel chan Event) {
 	session.awaitingReply[correlationId] = returnChannel
-}
-
-func (session *Session) startGeneratingWorkers() {
-	for {
-		log.Println("creating new worker channel")
-		channel, err := session.connection.Channel()
-		failOnError(err, "failed to generate worker")
-		session.workers <- channel
-	}
 }
 
 func (session *Session) CloseOnSignal() chan bool {

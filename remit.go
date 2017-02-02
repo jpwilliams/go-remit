@@ -111,10 +111,8 @@ func Connect(options ConnectionOptions) Session {
 		waitGroup:     &sync.WaitGroup{},
 		mu:            &sync.Mutex{},
 		awaitingReply: replyList,
-		workers:       make(chan *amqp.Channel, 1),
+		workerPool:    newWorkerPool(1, 5, conn),
 	}
-
-	go session.startGeneratingWorkers()
 
 	return session
 }

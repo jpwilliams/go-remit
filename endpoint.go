@@ -62,8 +62,7 @@ func (endpoint *Endpoint) Open() Endpoint {
 	endpoint.Data = make(chan Event)
 	endpoint.Ready = make(chan bool)
 
-	workChannel := <-endpoint.session.workers
-	defer workChannel.Close()
+	workChannel := endpoint.session.workerPool.Get()
 	queue, err := workChannel.QueueDeclare(
 		endpoint.Queue, // name of the queue
 		true,           // durable
@@ -82,8 +81,9 @@ func (endpoint *Endpoint) Open() Endpoint {
 		false,               // noWait
 		nil,                 // arguments
 	)
-
 	failOnError(err, "Could not bind queue to routing key")
+
+	endpoint.session.workerPool.Release(workChannel)
 
 	endpoint.channel, err = endpoint.session.connection.Channel()
 	failOnError(err, "Failed to create channel for consumption")
@@ -155,8 +155,6 @@ func (endpoint Endpoint) Close() {
 }
 
 func handleData(endpoint Endpoint, handlers []EndpointDataHandler, event Event) {
-	fmt.Println("handling data for", event.message.DeliveryTag)
-
 	endpoint.session.waitGroup.Add(1)
 	defer endpoint.session.waitGroup.Done()
 	endpoint.waitGroup.Add(1)
@@ -200,8 +198,7 @@ runner:
 
 	// fmt.Println(event.message.DeliveryTag, "queuing")
 	// fmt.Println(event.message.DeliveryTag, "checking")
-	workChannel := <-endpoint.session.workers
-	defer workChannel.Close()
+	workChannel := endpoint.session.workerPool.Get()
 	queue, err := workChannel.QueueDeclarePassive(
 		event.message.ReplyTo, // the queue to assert
 		false, // durable
@@ -211,11 +208,13 @@ runner:
 		nil,   // arguments
 	)
 	if err != nil {
-		fmt.Println("Reply consumer no longer present; skipping")
-		fmt.Println(err)
+		endpoint.session.workerPool.Drop(workChannel)
+		fmt.Println("Reply consumer no longer present; skipping", err)
 		event.message.Ack(false)
 		return
 	}
+
+	endpoint.session.workerPool.Release(workChannel)
 
 	err = endpoint.session.publishChannel.Publish(
 		"",         // exchange - use default here to publish directly to queue
