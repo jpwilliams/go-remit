@@ -13,6 +13,14 @@ import (
 // Endpoint manages the RPC-style consumption and
 // publishing of messages.
 type Endpoint struct {
+	// given properties
+	RoutingKey string
+	Queue      string
+
+	// generated properties
+	Data  chan Event
+	Ready chan bool
+
 	session       *Session
 	channel       *amqp.Channel
 	waitGroup     *sync.WaitGroup
@@ -20,23 +28,13 @@ type Endpoint struct {
 	consumerTag   string
 	dataListeners []chan Event
 	shouldReply   bool
-
-	RoutingKey string
-	Queue      string
-
-	Data  chan Event
-	Ready chan bool
-
-	DataHandler EndpointDataHandler
 }
 
 type EndpointOptions struct {
-	shouldReply bool
-
 	RoutingKey string
 	Queue      string
 
-	DataHandler EndpointDataHandler
+	shouldReply bool
 }
 
 type EndpointDataHandler func(Event)
