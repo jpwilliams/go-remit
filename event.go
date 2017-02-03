@@ -7,11 +7,6 @@ import (
 )
 
 type Event struct {
-	message     amqp.Delivery
-	waitGroup   *sync.WaitGroup
-	gotResult   bool
-	workChannel chan *amqp.Channel
-
 	EventId   string
 	EventType string
 	Resource  string
@@ -21,7 +16,11 @@ type Event struct {
 	Success chan interface{}
 	Failure chan interface{}
 	Next    chan bool
+
+	message     amqp.Delivery
+	waitGroup   *sync.WaitGroup
+	gotResult   bool
+	workChannel chan *amqp.Channel
 }
 
 type EventData map[string]interface{}
-type EventCallback func(Event) (interface{}, error)

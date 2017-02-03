@@ -8,12 +8,17 @@ import (
 	"github.com/streadway/amqp"
 )
 
+// Request represents an RPC request for data.
+//
+// Most commonly, this is used to contact another service to retrieve
+// data, contacting a `Session.Endpoint`.
 type Request struct {
-	session *Session
-
 	RoutingKey string
+
+	session *Session
 }
 
+// RequestOptions
 type RequestOptions struct {
 	RoutingKey string
 }
