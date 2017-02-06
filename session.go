@@ -136,7 +136,6 @@ func (session *Session) CloseOnSignal() chan bool {
 // 	// is synonymous with
 // 	remitSession.LazyEmit("service.connected", "my-service-id")
 //
-
 func (session *Session) Emit(key string) chan interface{} {
 	emit := createEmission(session, EmitOptions{
 		RoutingKey: key,
@@ -218,7 +217,7 @@ func (session *Session) EndpointWithOptions(options EndpointOptions) Endpoint {
 	return endpoint
 }
 
-// Emit immediately publishes a message using `Session.Emit` using the given routing
+// LazyEmit immediately publishes a message using `Session.Emit` using the given routing
 // key and data.
 //
 // Example:
