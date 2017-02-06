@@ -6,6 +6,8 @@ import (
 	"github.com/streadway/amqp"
 )
 
+// Event represents a single message being received. This could be data from
+// an endpoint, a reply following a request or an emission.
 type Event struct {
 	// Data given in the message.
 	// All fields are always passed back with the exception
