@@ -29,7 +29,7 @@ type Event struct {
 	workChannel chan *amqp.Channel
 }
 
-// EventData, for ease of use, sets `Data` within an `Event` to be a `map[string]interface{}`.
+// EventData - for ease of use - sets `Data` within an `Event` to be a `map[string]interface{}`.
 // This enables us to access basic properties via indexing, but deeper handling
 // is recommended if more control is needed.
 //
