@@ -196,8 +196,10 @@ func handleData(endpoint Endpoint, handlers []EndpointDataHandler, event Event) 
 	var retResult interface{}
 	var retErr interface{}
 
+	lastHandler := len(handlers) - 1
+
 runner:
-	for _, handler := range handlers {
+	for i, handler := range handlers {
 		go handler(event)
 
 		select {
@@ -205,7 +207,12 @@ runner:
 			break runner
 		case retErr = <-event.Failure:
 			break runner
-		case <-event.Next:
+		case tempRet := <-event.Next:
+			// if this is the final handler, break too
+			if i == handlerLen {
+				retResult = tempRet
+				break runner
+			}
 		}
 	}
 
