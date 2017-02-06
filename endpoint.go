@@ -171,8 +171,6 @@ func (endpoint *Endpoint) Open() {
 }
 
 func createEndpoint(session *Session, options EndpointOptions) Endpoint {
-	debug("creating endpoint")
-
 	endpoint := Endpoint{
 		RoutingKey:  options.RoutingKey,
 		Queue:       options.Queue,
@@ -209,12 +207,6 @@ runner:
 			break runner
 		case <-event.Next:
 		}
-	}
-
-	if retErr != nil {
-		debug("failure" + event.message.MessageId)
-	} else {
-		debug("success " + event.message.MessageId)
 	}
 
 	if !endpoint.shouldReply || event.message.ReplyTo == "" || event.message.CorrelationId == "" {

@@ -5,10 +5,7 @@ import (
 	"sync"
 
 	"github.com/streadway/amqp"
-	. "github.com/tj/go-debug"
 )
-
-var debug = Debug("remit")
 
 // J is a convenient aliaas for a `map[string]interface{}`, useful for dealing with
 // JSON is a more native manner.
@@ -49,8 +46,6 @@ type J map[string]interface{}
 //	})
 //
 func Connect(options ConnectionOptions) Session {
-	debug("connecting to amq")
-
 	conn, err := amqp.Dial(options.Url)
 	failOnError(err, "Failed to connect to RabbitMQ")
 

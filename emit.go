@@ -70,8 +70,6 @@ func (emit *Emit) send(data interface{}) {
 
 func (emit *Emit) waitForEmissions() {
 	for data := range emit.Channel {
-		debug("got emission")
-
 		emit.send(data)
 	}
 
