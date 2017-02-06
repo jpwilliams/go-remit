@@ -48,7 +48,7 @@ func (p *workerPool) create() *amqp.Channel {
 	return channel
 }
 
-func (p *workerPool) Get() *amqp.Channel {
+func (p *workerPool) get() *amqp.Channel {
 waiting:
 	p.mx.Lock()
 	defer p.mx.Unlock()
@@ -72,12 +72,12 @@ waiting:
 	return <-p.channels
 }
 
-func (p *workerPool) Release(channel *amqp.Channel) {
+func (p *workerPool) release(channel *amqp.Channel) {
 	p.mx.Lock()
 	defer p.mx.Unlock()
 
 	if (p.count - p.inuse) > p.min {
-		p.Drop(channel)
+		p.drop(channel)
 		p.count--
 	} else {
 		p.channels <- channel
@@ -86,7 +86,7 @@ func (p *workerPool) Release(channel *amqp.Channel) {
 	p.inuse--
 }
 
-func (p *workerPool) Drop(channel *amqp.Channel) {
+func (p *workerPool) drop(channel *amqp.Channel) {
 	p.mx.Lock()
 	defer p.mx.Unlock()
 
