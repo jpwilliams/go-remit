@@ -12,7 +12,20 @@ import (
 
 // Endpoint manages the RPC-style consumption and
 // publishing of messages.
+//
+// Most commonly, this is used to set up an endpoint that can be requested
+// using `Session.Request` or `Session.LazyRequest`.
+//
+// For examples of Endpoint usage, see `Session.Endpoint` and `Session.LazyEndpoint`.
 type Endpoint struct {
+	// given properties
+	RoutingKey string
+	Queue      string
+
+	// generated properties
+	Data  chan Event
+	Ready chan bool
+
 	session       *Session
 	channel       *amqp.Channel
 	waitGroup     *sync.WaitGroup
@@ -20,49 +33,84 @@ type Endpoint struct {
 	consumerTag   string
 	dataListeners []chan Event
 	shouldReply   bool
-
-	RoutingKey string
-	Queue      string
-
-	Data  chan Event
-	Ready chan bool
-
-	DataHandler EndpointDataHandler
 }
 
+// EndpointOptions is a list of options that can be passed when setting up an endpoint.
 type EndpointOptions struct {
-	shouldReply bool
-
 	RoutingKey string
 	Queue      string
 
-	DataHandler EndpointDataHandler
+	shouldReply bool
 }
 
+// EndpointDataHandler is the function spec needed for listening to endpoint data.
 type EndpointDataHandler func(Event)
 
-func createEndpoint(session *Session, options EndpointOptions) Endpoint {
-	debug("creating endpoint")
-
-	endpoint := Endpoint{
-		RoutingKey:  options.RoutingKey,
-		Queue:       options.Queue,
-		session:     session,
-		Data:        make(chan Event),
-		Ready:       make(chan bool),
-		waitGroup:   &sync.WaitGroup{},
-		mu:          &sync.Mutex{},
-		shouldReply: options.shouldReply,
-	}
-
-	return endpoint
+// Close closes the endpoint, stopping message consumption and closing the endpoint's
+// receiving channel.
+//
+// It will cancel consumption, but wait for all unacked messages to be handled
+// before closing the channel, meaning no loss should occur.
+//
+// The endpoint can be reopened using `Endpoint.Open`.
+func (endpoint Endpoint) Close() {
+	err := endpoint.channel.Cancel(endpoint.consumerTag, false)
+	failOnError(err, "Failed to cancel consume channel for endpoint")
+	endpoint.waitGroup.Wait()
+	err = endpoint.channel.Close()
+	failOnError(err, "Failed to close consume channel for endpoint")
+	endpoint.channel = nil
+	close(endpoint.Data)
+	close(endpoint.Ready)
 }
 
-func (endpoint *Endpoint) Open() Endpoint {
+// OnData is used to register a data handler for a particular endpoint.
+// A data handler here is a function (or set of functions) to run whenever
+// a new message is received.
+//
+// If multiple handlers are provided in sequence, earlier functions will act as
+// "middleware", used primarily for the mutation of the `Event` or the like.
+//
+// An example of this might be:
+//
+// 	endpoint := remitSession.Endpoint("math.sum")
+// 	endpoint.OnData(logMessage, parseArguments, handle)
+//
+// In the above example, `logMessage`, `parseArguments` and `handle` will be run
+// in sequence. If any of the functions push data to either `Event.Success` or
+// `Event.Failure`, the chain is broken and the message immediately replied to.
+// Otherwise, sending `true` to `Event.Next` should be performed to indicate that
+// it's safe to move to the next step.
+//
+// If `Event.Next` is pushed to on the final handler, the message will be treated
+// as successful but the reply will contain no data.
+func (endpoint *Endpoint) OnData(handlers ...EndpointDataHandler) {
+	if len(handlers) == 0 {
+		panic("Failed to create endpoint data handler with no functions")
+	}
+
+	dataChan := make(chan Event)
+	endpoint.mu.Lock()
+	endpoint.dataListeners = append(endpoint.dataListeners, dataChan)
+	endpoint.mu.Unlock()
+
+	go func() {
+		for event := range dataChan {
+			go handleData(*endpoint, handlers, event)
+		}
+	}()
+}
+
+// Open the endpoint to messages, starting consumption and pushing `true` to
+// `Endpoint.Ready` upon completion.
+//
+// The recommendation here is to ensure any and all data handlers are registered
+// before opening the endpoint up.
+func (endpoint *Endpoint) Open() {
 	endpoint.Data = make(chan Event)
 	endpoint.Ready = make(chan bool)
 
-	workChannel := endpoint.session.workerPool.Get()
+	workChannel := endpoint.session.workerPool.get()
 	queue, err := workChannel.QueueDeclare(
 		endpoint.Queue, // name of the queue
 		true,           // durable
@@ -83,7 +131,7 @@ func (endpoint *Endpoint) Open() Endpoint {
 	)
 	failOnError(err, "Could not bind queue to routing key")
 
-	endpoint.session.workerPool.Release(workChannel)
+	endpoint.session.workerPool.release(workChannel)
 
 	endpoint.channel, err = endpoint.session.connection.Channel()
 	failOnError(err, "Failed to create channel for consumption")
@@ -120,38 +168,23 @@ func (endpoint *Endpoint) Open() Endpoint {
 	case endpoint.Ready <- true:
 	default:
 	}
-
-	return *endpoint
 }
 
-func (endpoint *Endpoint) OnData(handlers ...EndpointDataHandler) Endpoint {
-	if len(handlers) == 0 {
-		panic("Failed to create endpoint data handler with no functions")
+func createEndpoint(session *Session, options EndpointOptions) Endpoint {
+	debug("creating endpoint")
+
+	endpoint := Endpoint{
+		RoutingKey:  options.RoutingKey,
+		Queue:       options.Queue,
+		session:     session,
+		Data:        make(chan Event),
+		Ready:       make(chan bool),
+		waitGroup:   &sync.WaitGroup{},
+		mu:          &sync.Mutex{},
+		shouldReply: options.shouldReply,
 	}
 
-	dataChan := make(chan Event)
-	endpoint.mu.Lock()
-	endpoint.dataListeners = append(endpoint.dataListeners, dataChan)
-	endpoint.mu.Unlock()
-
-	go func() {
-		for event := range dataChan {
-			go handleData(*endpoint, handlers, event)
-		}
-	}()
-
-	return *endpoint
-}
-
-func (endpoint Endpoint) Close() {
-	err := endpoint.channel.Cancel(endpoint.consumerTag, false)
-	failOnError(err, "Failed to cancel consume channel for endpoint")
-	endpoint.waitGroup.Wait()
-	err = endpoint.channel.Close()
-	failOnError(err, "Failed to close consume channel for endpoint")
-	endpoint.channel = nil
-	close(endpoint.Data)
-	close(endpoint.Ready)
+	return endpoint
 }
 
 func handleData(endpoint Endpoint, handlers []EndpointDataHandler, event Event) {
@@ -198,7 +231,7 @@ runner:
 
 	// fmt.Println(event.message.DeliveryTag, "queuing")
 	// fmt.Println(event.message.DeliveryTag, "checking")
-	workChannel := endpoint.session.workerPool.Get()
+	workChannel := endpoint.session.workerPool.get()
 	queue, err := workChannel.QueueDeclarePassive(
 		event.message.ReplyTo, // the queue to assert
 		false, // durable
@@ -208,13 +241,13 @@ runner:
 		nil,   // arguments
 	)
 	if err != nil {
-		endpoint.session.workerPool.Drop(workChannel)
+		endpoint.session.workerPool.drop(workChannel)
 		fmt.Println("Reply consumer no longer present; skipping", err)
 		event.message.Ack(false)
 		return
 	}
 
-	endpoint.session.workerPool.Release(workChannel)
+	endpoint.session.workerPool.release(workChannel)
 
 	err = endpoint.session.publishChannel.Publish(
 		"",         // exchange - use default here to publish directly to queue

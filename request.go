@@ -8,25 +8,26 @@ import (
 	"github.com/streadway/amqp"
 )
 
+// Request represents an RPC request for data.
+//
+// Most commonly, this is used to contact another service to retrieve
+// data, utilising a `Session.Endpoint`.
+//
+// For examples of Request usage, see `Session.Request` and `Session.LazyRequest`.
 type Request struct {
-	session *Session
-
 	RoutingKey string
+
+	session *Session
 }
 
+// RequestOptions is a list of options that can be passed when setting up
+// a request.
 type RequestOptions struct {
 	RoutingKey string
 }
 
-func createRequest(session *Session, options RequestOptions) Request {
-	request := Request{
-		RoutingKey: options.RoutingKey,
-		session:    session,
-	}
-
-	return request
-}
-
+// Send sends some data to a previously-set-up `Request` using `Session.Request`.
+// It returns a channel on which a single reply `Event` will be passed upon RPC completion.
 func (request *Request) Send(data interface{}) chan Event {
 	j, err := json.Marshal(data)
 	failOnError(err, "Failed making JSON from result")
@@ -54,4 +55,13 @@ func (request *Request) Send(data interface{}) chan Event {
 	failOnError(err, "Failed to send request message")
 
 	return receiveChannel
+}
+
+func createRequest(session *Session, options RequestOptions) Request {
+	request := Request{
+		RoutingKey: options.RoutingKey,
+		session:    session,
+	}
+
+	return request
 }

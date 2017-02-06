@@ -9,6 +9,12 @@ import (
 	"github.com/streadway/amqp"
 )
 
+// Emit represents an emission to emit data to the system.
+//
+// Most commonly, this is used to notify other services of changes,
+// update configuration or the like.
+//
+// For examples of Emit usage, see `Session.Emit` and `Session.LazyEmit`.
 type Emit struct {
 	session *Session
 	Channel chan interface{}
@@ -16,6 +22,8 @@ type Emit struct {
 	RoutingKey string
 }
 
+// EmitOptions is a list of options that can be passed when setting up
+// an emission.
 type EmitOptions struct {
 	RoutingKey string
 }
@@ -30,16 +38,6 @@ func createEmission(session *Session, options EmitOptions) Emit {
 	go emit.waitForEmissions()
 
 	return emit
-}
-
-func (emit *Emit) waitForEmissions() {
-	for data := range emit.Channel {
-		debug("got emission")
-
-		emit.send(data)
-	}
-
-	fmt.Println("finished")
 }
 
 func (emit *Emit) send(data interface{}) {
@@ -68,4 +66,14 @@ func (emit *Emit) send(data interface{}) {
 		message,         // amqp.Publishing
 	)
 	failOnError(err, "Failed to send emit message")
+}
+
+func (emit *Emit) waitForEmissions() {
+	for data := range emit.Channel {
+		debug("got emission")
+
+		emit.send(data)
+	}
+
+	fmt.Println("finished")
 }
