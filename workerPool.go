@@ -44,7 +44,10 @@ func (p *workerPool) new() {
 
 func (p *workerPool) create() *amqp.Channel {
 	fmt.Println("creating work channel")
-	channel, _ := p.connection.Channel()
+	channel, err := p.connection.Channel()
+	if err != nil {
+		panic(err)
+	}
 	return channel
 }
 
