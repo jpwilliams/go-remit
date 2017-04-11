@@ -1,7 +1,6 @@
 package remit
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/streadway/amqp"
@@ -43,7 +42,6 @@ func (p *workerPool) new() {
 }
 
 func (p *workerPool) create() *amqp.Channel {
-	fmt.Println("creating work channel")
 	channel, err := p.connection.Channel()
 	if err != nil {
 		panic(err)
@@ -86,14 +84,14 @@ func (p *workerPool) release(channel *amqp.Channel) {
 	p.mx.Lock()
 	defer p.mx.Unlock()
 
+	p.inuse--
+
 	if (p.count - p.inuse) > p.min {
-		p.drop(channel)
+		channel.Close()
 		p.count--
 	} else {
 		p.channels <- channel
 	}
-
-	p.inuse--
 }
 
 func (p *workerPool) drop(channel *amqp.Channel) {
