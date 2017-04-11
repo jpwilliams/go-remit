@@ -52,9 +52,15 @@ func (p *workerPool) create() *amqp.Channel {
 }
 
 func (p *workerPool) get() *amqp.Channel {
+	// only defer an unlock on the first iteration here
+	looped := false
+
 waiting:
 	p.mx.Lock()
-	defer p.mx.Unlock()
+
+	if !looped {
+		defer p.mx.Unlock()
+	}
 
 	if p.inuse < p.count {
 		p.inuse++
@@ -64,6 +70,7 @@ waiting:
 		p.count++
 		p.inuse++
 	} else {
+		looped = true
 		p.mx.Unlock()
 		goto waiting
 	}
@@ -93,7 +100,6 @@ func (p *workerPool) drop(channel *amqp.Channel) {
 	p.mx.Lock()
 	defer p.mx.Unlock()
 
-	channel.Close()
 	p.count--
 	p.inuse--
 }
